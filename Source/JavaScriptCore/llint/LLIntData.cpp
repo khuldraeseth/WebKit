@@ -381,26 +381,32 @@ void initialize()
 #if ENABLE(WEBASSEMBLY)
     {
         static LazyNeverDestroyed<MacroAssemblerCodeRef<NativeToJITGatePtrTag>> codeRef;
+#if ENABLE(JIT) && CPU(ARM64E)
         if (Options::useJITCage() && Options::useJSPI())
             codeRef.construct(relocateJITReturnPCThunk(retagCodePtr<void*, CFunctionPtrTag, OperationPtrTag>(&relocate_jit_return_pc_return_location)));
         else
+#endif
             codeRef.construct(MacroAssemblerCodeRef<NativeToJITGatePtrTag>::createSelfManagedCodeRef(CodePtr<NativeToJITGatePtrTag>::fromTaggedPtr(retagCodePtr<void*, CFunctionPtrTag, NativeToJITGatePtrTag>(&relocate_jit_return_pc_trampoline))));
         g_jscConfig.llint.gateMap[static_cast<unsigned>(Gate::relocateJITReturnPC)] = codeRef.get().code().taggedPtr();
     }
     {
         static LazyNeverDestroyed<MacroAssemblerCodeRef<NativeToJITGatePtrTag>> codeRef;
+#if ENABLE(JIT) && CPU(ARM64E)
         if (Options::useJITCage() && Options::useJSPI())
             codeRef.construct(exitImplantedSliceGateThunk(retagCodePtr<void*, CFunctionPtrTag, OperationPtrTag>(&exit_implanted_slice)));
         else
+#endif
             codeRef.construct(MacroAssemblerCodeRef<NativeToJITGatePtrTag>::createSelfManagedCodeRef(CodePtr<NativeToJITGatePtrTag>::fromTaggedPtr(retagCodePtr<void*, CFunctionPtrTag, NativeToJITGatePtrTag>(&exit_implanted_slice))));
         // Store untagged so it can be signed with IB + sp for use with retab
         g_jscConfig.llint.gateMap[static_cast<unsigned>(Gate::exitImplantedSliceGate)] = codeRef.get().code().untaggedPtr();
     }
     {
         static LazyNeverDestroyed<MacroAssemblerCodeRef<NativeToJITGatePtrTag>> codeRef;
+#if ENABLE(JIT) && CPU(ARM64E)
         if (Options::useJITCage() && Options::useJSPI())
             codeRef.construct(getSentinelFrameReturnPCGateThunk(retagCodePtr<void*, CFunctionPtrTag, OperationPtrTag>(&get_sentinel_frame_return_pc_return_location)));
         else
+#endif
             codeRef.construct(MacroAssemblerCodeRef<NativeToJITGatePtrTag>::createSelfManagedCodeRef(CodePtr<NativeToJITGatePtrTag>::fromTaggedPtr(retagCodePtr<void*, CFunctionPtrTag, NativeToJITGatePtrTag>(&get_sentinel_frame_return_pc_trampoline))));
         g_jscConfig.llint.gateMap[static_cast<unsigned>(Gate::getSentinelFrameReturnPCGate)] = codeRef.get().code().taggedPtr();
     }
