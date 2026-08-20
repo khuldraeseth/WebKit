@@ -25,21 +25,25 @@
 
 #pragma once
 
-#if ENABLE(JIT)
+// PropertyInlineCacheClearingWatchpoint is the terminal watchpoint that resets a PropertyInlineCache;
+// it holds only a CodeBlock and the cache, so it is available without the JIT. The two level-1
+// watchpoints below fan external condition sets into a stub routine's own set and are JIT-only.
 
-#include "AdaptiveInferredPropertyValueWatchpointBase.h"
 #include "CodeBlock.h"
-#include "GCAwareJITStubRoutine.h"
-#include "ObjectPropertyCondition.h"
 #include "PackedCellPtr.h"
 #include "Watchpoint.h"
 #include <wtf/Noncopyable.h>
 #include <wtf/TZoneMalloc.h>
 
+#if ENABLE(JIT)
+#include "AdaptiveInferredPropertyValueWatchpointBase.h"
+#include "GCAwareJITStubRoutine.h"
+#include "ObjectPropertyCondition.h"
+#endif
+
 namespace JSC {
 
 class CodeBlock;
-class PolymorphicAccessJITStubRoutine;
 class PropertyInlineCache;
 
 class PropertyInlineCacheClearingWatchpoint final : public Watchpoint {
@@ -61,6 +65,10 @@ private:
     PackedCellPtr<CodeBlock> m_owner;
     PropertyInlineCache& m_propertyCache;
 };
+
+#if ENABLE(JIT)
+
+class PolymorphicAccessJITStubRoutine;
 
 class StructureTransitionPropertyInlineCacheClearingWatchpoint final : public Watchpoint {
     WTF_MAKE_NONCOPYABLE(StructureTransitionPropertyInlineCacheClearingWatchpoint);
@@ -106,6 +114,6 @@ private:
     const Ref<WatchpointSet> m_watchpointSet;
 };
 
-} // namespace JSC
-
 #endif // ENABLE(JIT)
+
+} // namespace JSC

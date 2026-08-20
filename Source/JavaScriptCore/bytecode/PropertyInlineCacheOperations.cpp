@@ -33,6 +33,7 @@
 #include "ICStats.h"
 #include "JSCJSValueInlines.h"
 #include "PropertyInlineCacheOperationsInlines.h"
+#include "PropertyNameInlines.h"
 #include "Repatch.h"
 #include "SuperSampler.h"
 

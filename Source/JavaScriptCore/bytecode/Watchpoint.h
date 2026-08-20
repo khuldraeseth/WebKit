@@ -94,12 +94,12 @@ class WatchpointSet;
     macro(StructureChainInvalidation, StructureChainInvalidationWatchpoint) \
     macro(ObjectAdaptiveStructure, ObjectAdaptiveStructureWatchpoint) \
     macro(Chained, ChainedWatchpoint) \
+    macro(PropertyInlineCacheClearing, PropertyInlineCacheClearingWatchpoint) \
 
 #if ENABLE(JIT)
 #define JSC_WATCHPOINT_TYPES_WITHOUT_DFG(macro) \
     JSC_WATCHPOINT_TYPES_WITHOUT_JIT(macro) \
-    macro(StructureTransitionPropertyInlineCacheClearing, StructureTransitionPropertyInlineCacheClearingWatchpoint) \
-    macro(PropertyInlineCacheClearing, PropertyInlineCacheClearingWatchpoint)
+    macro(StructureTransitionPropertyInlineCacheClearing, StructureTransitionPropertyInlineCacheClearingWatchpoint)
 
 #if ENABLE(DFG_JIT)
 #define JSC_WATCHPOINT_TYPES(macro) \

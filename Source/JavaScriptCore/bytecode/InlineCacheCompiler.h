@@ -438,7 +438,10 @@ static constexpr size_t prologueSizeInBytesDataIC = 0;
 #elif CPU(RISCV64)
 static constexpr size_t prologueSizeInBytesDataIC = 0;
 #else
-#error "unsupported architecture"
+// The CPUs that get C_LOOP have no entry above, and C_LOOP emits no DataIC prologue: backends are
+// mutually exclusive offlineasm settings, so getByIdLLIntHandlerPrologue's X86_64/ARM64 tests are
+// both false under the C_LOOP backend whatever the host CPU is.
+static constexpr size_t prologueSizeInBytesDataIC = 0;
 #endif
 
 } // namespace JSC

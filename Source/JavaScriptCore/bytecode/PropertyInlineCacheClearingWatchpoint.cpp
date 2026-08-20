@@ -26,8 +26,6 @@
 #include "config.h"
 #include "PropertyInlineCacheClearingWatchpoint.h"
 
-#if ENABLE(JIT)
-
 #include "CodeBlockInlines.h"
 #include "JSCellInlines.h"
 #include "PropertyInlineCache.h"
@@ -37,8 +35,10 @@
 namespace JSC {
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(PropertyInlineCacheClearingWatchpoint);
+#if ENABLE(JIT)
 WTF_MAKE_TZONE_ALLOCATED_IMPL(AdaptiveValuePropertyInlineCacheClearingWatchpoint);
 WTF_MAKE_TZONE_ALLOCATED_IMPL(StructureTransitionPropertyInlineCacheClearingWatchpoint);
+#endif
 
 PropertyInlineCacheClearingWatchpoint::~PropertyInlineCacheClearingWatchpoint()
 {
@@ -55,8 +55,19 @@ void PropertyInlineCacheClearingWatchpoint::fireInternal(VM&, const FireDetail&)
     // That works, because deleting a watchpoint removes it from the set's list, and
     // the set's list traversal for firing is robust against the set changing.
     ConcurrentJSLocker locker(m_owner->m_lock);
+#if ENABLE(JIT)
     m_propertyCache.reset(locker, m_owner.get());
+#else
+    // reset() bottoms out in generateSlowPathHandler(), so it needs the LLInt-native terminal handler
+    // that a later milestone adds. Unreachable until then: nothing constructs a PropertyInlineCache
+    // without the JIT, so this watchpoint is never installed.
+    UNUSED_PARAM(locker);
+    UNUSED_VARIABLE(m_propertyCache);
+    RELEASE_ASSERT_NOT_REACHED();
+#endif
 }
+
+#if ENABLE(JIT)
 
 void StructureTransitionPropertyInlineCacheClearingWatchpoint::fireInternal(VM& vm, const FireDetail&)
 {
@@ -93,7 +104,7 @@ void AdaptiveValuePropertyInlineCacheClearingWatchpoint::handleFire(VM& vm, cons
     Ref { m_watchpointSet }->fireAll(vm, detail);
 }
 
-} // namespace JSC
-
 #endif // ENABLE(JIT)
+
+} // namespace JSC
 

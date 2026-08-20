@@ -27,11 +27,12 @@
 
 #include <wtf/Platform.h>
 
-#if ENABLE(JIT)
+// An AccessCase is pure data describing one property access; all of the code generation for it lives
+// in InlineCacheCompiler, which stays JIT-only. Kept available without the JIT so LLInt's Handler IC
+// can reuse the same classification and the same GC hooks (visitWeak/propagateTransitions) rather
+// than growing a parallel set.
 
 #include "CacheableIdentifier.h"
-#include "GCAwareJITStubRoutine.h"
-#include "JITStubRoutine.h"
 #include "JSFunctionInlines.h"
 #include "ObjectPropertyConditionSet.h"
 #include "PolyProtoAccessChain.h"
@@ -425,5 +426,3 @@ template<typename T> struct HashTraits;
 template<> struct HashTraits<JSC::AccessCase::AccessType> : public StrongEnumHashTraits<JSC::AccessCase::AccessType> { };
 
 } // namespace WTF
-
-#endif

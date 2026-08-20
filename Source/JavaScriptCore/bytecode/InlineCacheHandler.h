@@ -25,13 +25,18 @@
 
 #pragma once
 
-#if ENABLE(JIT)
+// An InlineCacheHandler is one node of a property IC's handler chain. The chain and its per-node data
+// are shared with LLInt, so they are available without the JIT; the compiled-thunk entries and the
+// stub routine that owns generated code are gated below.
 
 #include "AccessCase.h"
-#include "CallLinkInfo.h"
-#include "JITStubRoutine.h"
 #include "PropertyInlineCacheClearingWatchpoint.h"
 #include <wtf/RefCounted.h>
+
+#if ENABLE(JIT)
+#include "CallLinkInfo.h"
+#include "JITStubRoutine.h"
+#endif
 
 namespace JSC {
 
@@ -64,22 +69,31 @@ class JSC_CACHE_LINE_ALIGNED InlineCacheHandler : public RefCounted<InlineCacheH
     friend class InlineCacheCompiler;
     friend class InlineCacheHandlerWithJSCall;
 public:
+#if ENABLE(JIT)
     static Ref<InlineCacheHandler> create(Ref<InlineCacheHandler>&&, CodeBlock*, PropertyInlineCache&, Ref<PolymorphicAccessJITStubRoutine>&&, std::unique_ptr<PropertyInlineCacheClearingWatchpoint>&&, unsigned callLinkInfoCount);
     static Ref<InlineCacheHandler> createPreCompiled(Ref<InlineCacheHandler>&&, CodeBlock*, PropertyInlineCache&, Ref<PolymorphicAccessJITStubRoutine>&&, std::unique_ptr<PropertyInlineCacheClearingWatchpoint>&&, AccessCase&, CacheType);
+#endif
 
     void operator delete(InlineCacheHandler*, std::destroying_delete_t);
 
+#if ENABLE(JIT)
     CodePtr<JITStubRoutinePtrTag> callTarget() const { return m_callTarget; }
     CodePtr<JITStubRoutinePtrTag> jumpTarget() const { return m_jumpTarget; }
+#endif
 
     void aboutToDie();
     bool containsPC(void* pc) const
     {
+#if ENABLE(JIT)
         if (!m_stubRoutine)
             return false;
 
         uintptr_t pcAsInt = std::bit_cast<uintptr_t>(pc);
         return m_stubRoutine->startAddress() <= pcAsInt && pcAsInt <= m_stubRoutine->endAddress();
+#else
+        UNUSED_PARAM(pc);
+        return false;
+#endif
     }
 
     // If this returns false then we are requesting a reset of the owning PropertyInlineCache.
@@ -92,7 +106,9 @@ public:
     void addOwner(CodeBlock*);
     void removeOwner(CodeBlock*);
 
+#if ENABLE(JIT)
     PolymorphicAccessJITStubRoutine* stubRoutine() { return m_stubRoutine.get(); }
+#endif
 
     InlineCacheHandler* next() const { return m_next.get(); }
     void setNext(RefPtr<InlineCacheHandler>&& next)
@@ -108,8 +124,10 @@ public:
 
     bool makesJSCalls() const { return m_makesJSCalls; }
 
+#if ENABLE(JIT)
     static constexpr ptrdiff_t offsetOfCallTarget() { return OBJECT_OFFSETOF(InlineCacheHandler, m_callTarget); }
     static constexpr ptrdiff_t offsetOfJumpTarget() { return OBJECT_OFFSETOF(InlineCacheHandler, m_jumpTarget); }
+#endif
     static constexpr ptrdiff_t offsetOfLLIntCallTarget() { return OBJECT_OFFSETOF(InlineCacheHandler, m_llintCallTarget); }
     static constexpr ptrdiff_t offsetOfLLIntJumpTarget() { return OBJECT_OFFSETOF(InlineCacheHandler, m_llintJumpTarget); }
     static constexpr ptrdiff_t offsetOfNext() { return OBJECT_OFFSETOF(InlineCacheHandler, m_next); }
@@ -142,16 +160,23 @@ public:
 
 protected:
     InlineCacheHandler();
+#if ENABLE(JIT)
     InlineCacheHandler(bool makesJSCalls, Ref<InlineCacheHandler>&&, Ref<PolymorphicAccessJITStubRoutine>&&, std::unique_ptr<PropertyInlineCacheClearingWatchpoint>&&, CacheType);
 
     static Ref<InlineCacheHandler> createSlowPath(VM&, AccessType);
+#endif
 
     // The selection and ordering of the fields through m_uid is deliberate.
     // They are are either hot with high affinity, or placed where they are to minimize padding.
     StructureID m_structureID { };
     RefPtr<InlineCacheHandler> m_next;
+#if ENABLE(JIT)
+    // Entries into this node's compiled thunk. A build without the JIT has no compiled chain, so these
+    // are omitted rather than left null -- they sit inside the hot prefix, hence the two-valued
+    // offsetOfUid() assert below.
     CodePtr<JITStubRoutinePtrTag> m_callTarget;
     CodePtr<JITStubRoutinePtrTag> m_jumpTarget;
+#endif
     PropertyOffset m_offset { invalidOffset };
     CacheType m_cacheType { CacheType::Unset };
     bool m_makesJSCalls { false };
@@ -173,7 +198,11 @@ protected:
             WriteBarrierBase<Unknown>* m_moduleVariableSlot;
         } s3;
     } u;
+#if ENABLE(JIT)
     RefPtr<PolymorphicAccessJITStubRoutine> m_stubRoutine;
+#endif
+    // Unconditional: InlineCacheHandler::visitWeak reads only m_accessCase and m_stubRoutine, so a node
+    // without an access case is invisible to GC and its cached StructureID would dangle.
     RefPtr<AccessCase> m_accessCase;
     std::unique_ptr<PropertyInlineCacheClearingWatchpoint> m_watchpoint;
     // LLInt Handler-IC entries: runtime addresses of a static offlineasm handler chosen from
@@ -188,8 +217,15 @@ protected:
 };
 
 #if !ASSERT_ENABLED && !ASAN_ENABLED && CPU(ARM64) && CPU(ADDRESS64)
+#if ENABLE(JIT)
 static_assert(InlineCacheHandler::offsetOfUid() == 40, "InlineCacheHandler hot field layout drifted.");
+#else
+// m_callTarget/m_jumpTarget are absent without the JIT, so the hot prefix is 16 bytes shorter.
+static_assert(InlineCacheHandler::offsetOfUid() == 24, "InlineCacheHandler hot field layout drifted.");
 #endif
+#endif
+
+#if ENABLE(JIT)
 
 class InlineCacheHandlerWithJSCall final : public InlineCacheHandler {
     WTF_MAKE_TZONE_ALLOCATED(InlineCacheHandlerWithJSCall);
@@ -206,10 +242,12 @@ private:
     DataOnlyCallLinkInfo m_callLinkInfo;
 };
 
+#endif // ENABLE(JIT)
+
 } // namespace JSC
 
+#if ENABLE(JIT)
 SPECIALIZE_TYPE_TRAITS_BEGIN(JSC::InlineCacheHandlerWithJSCall)
     static bool isType(const JSC::InlineCacheHandler& handler) { return handler.makesJSCalls(); }
 SPECIALIZE_TYPE_TRAITS_END()
-
-#endif // ENABLE(JIT)
+#endif

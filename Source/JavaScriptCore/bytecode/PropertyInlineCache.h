@@ -28,20 +28,23 @@
 #include "CacheableIdentifier.h"
 #include "CodeBlock.h"
 #include "CodeOrigin.h"
-#include "InlineCacheCompiler.h"
-#include "JITStubRoutine.h"
-#include "MacroAssembler.h"
+// CacheType and the handler chain node. Included directly rather than relying on InlineCacheCompiler.h,
+// which stays JIT-only.
+#include "InlineCacheHandler.h"
 #include "Options.h"
 #include "PropertyInlineCacheClearingWatchpoint.h"
 #include "PropertyInlineCacheOperations.h"
 #include "PropertyInlineCacheSummary.h"
-#include "RegisterSet.h"
 #include "Structure.h"
 #include <wtf/Lock.h>
 #include <wtf/TZoneMalloc.h>
 
-
 #if ENABLE(JIT)
+#include "InlineCacheCompiler.h"
+#include "JITStubRoutine.h"
+#include "MacroAssembler.h"
+#include "RegisterSet.h"
+#endif
 
 namespace JSC {
 
@@ -148,7 +151,9 @@ public:
     void deref();
     void aboutToDie();
 
+#if ENABLE(JIT)
     void NODELETE initializePredefinedRegisters();
+#endif
 
     DECLARE_VISIT_AGGREGATE;
 
@@ -167,6 +172,9 @@ public:
 
     bool NODELETE containsPC(void* pc) const;
 
+#if ENABLE(JIT)
+    // Pinned-register views of the cache. Only the repatching/compiled paths assign these; see the
+    // FIXME on the GPR members below.
     JSValueRegs valueRegs() const
     {
         return JSValueRegs(
@@ -193,6 +201,7 @@ public:
 #endif
             m_baseGPR);
     }
+#endif // ENABLE(JIT)
 
     bool thisValueIsInExtraGPR() const { return accessType == AccessType::GetByIdWithThis || accessType == AccessType::GetByValWithThis; }
 
@@ -377,10 +386,12 @@ public:
     static constexpr ptrdiff_t offsetOfByIdSelfOffset() { return OBJECT_OFFSETOF(PropertyInlineCache, byIdSelfOffset); }
     static constexpr ptrdiff_t offsetOfInlineAccessBaseStructureID() { return OBJECT_OFFSETOF(PropertyInlineCache, m_inlineAccessBaseStructureID); }
     static constexpr ptrdiff_t offsetOfInlineHolder() { return OBJECT_OFFSETOF(PropertyInlineCache, m_inlineHolder); }
-    static constexpr ptrdiff_t offsetOfDoneLocation() { return OBJECT_OFFSETOF(PropertyInlineCache, doneLocation); }
     static constexpr ptrdiff_t offsetOfCountdown() { return OBJECT_OFFSETOF(PropertyInlineCache, countdown); }
     static constexpr ptrdiff_t offsetOfCallSiteIndex() { return OBJECT_OFFSETOF(PropertyInlineCache, callSiteIndex); }
+#if ENABLE(JIT)
+    static constexpr ptrdiff_t offsetOfDoneLocation() { return OBJECT_OFFSETOF(PropertyInlineCache, doneLocation); }
     static constexpr ptrdiff_t offsetOfSlowPathStartLocation() { return OBJECT_OFFSETOF(PropertyInlineCache, slowPathStartLocation); }
+#endif
     static constexpr ptrdiff_t offsetOfHandler() { return OBJECT_OFFSETOF(PropertyInlineCache, m_handler); }
     static constexpr ptrdiff_t offsetOfGlobalObject() { return OBJECT_OFFSETOF(PropertyInlineCache, m_globalObject); }
 
@@ -388,6 +399,7 @@ public:
 
     JSGlobalObject* globalObject() const { return m_globalObject; }
 
+#if ENABLE(JIT)
     inline ScalarRegisterSet usedRegisters() const;
     inline void setUsedRegisters(ScalarRegisterSet);
     inline void removeUsedRegister(GPRReg);
@@ -420,14 +432,20 @@ public:
         }
     }
 #endif
+#endif // ENABLE(JIT)
 
     CodeOrigin codeOrigin { };
     PropertyOffset byIdSelfOffset;
     WriteBarrierStructureID m_inlineAccessBaseStructureID;
     JSCell* m_inlineHolder { nullptr };
     CacheableIdentifier m_identifier;
+#if ENABLE(JIT)
+    // Resume points in generated code: doneLocation is where DFG OSR exit returns into a reconstructed
+    // inlined getter frame, slowPathStartLocation is a handler stub's failure-exit jump target. Both are
+    // distributed per CodeBlock by setupWithUnlinkedBaselineCode, which never runs without the JIT.
     CodeLocationLabel<JSInternalPtrTag> doneLocation;
     CodeLocationLabel<JITStubRoutinePtrTag> slowPathStartLocation;
+#endif
 
     JSGlobalObject* m_globalObject { nullptr };
 private:
@@ -444,6 +462,7 @@ public:
 
     CallSiteIndex callSiteIndex;
 
+#if ENABLE(JIT)
     // FIXME: These should only be needed by the repatching ICs but it's slightly non-trivial to move them there as different AccessTypes use different pinned registers.
     GPRReg m_baseGPR { InvalidGPRReg };
     GPRReg m_valueGPR { InvalidGPRReg };
@@ -459,6 +478,7 @@ public:
     GPRReg m_extraTagGPR { InvalidGPRReg };
     GPRReg m_extra2TagGPR { InvalidGPRReg };
 #endif
+#endif // ENABLE(JIT)
 
     AccessType accessType { AccessType::GetById };
 protected:
@@ -688,6 +708,8 @@ public:
 // case calls JS), the machine code is protected by GCAwareJITStubRoutine (as described above),
 // this guarantees the code of the stub is still valid. No inline slabs can be at the
 // first instruction when this rewrite happens either.
+#if ENABLE(JIT)
+
 class RepatchingPropertyInlineCache final : public PropertyInlineCache {
     WTF_MAKE_NONCOPYABLE(RepatchingPropertyInlineCache);
 public:
@@ -733,15 +755,21 @@ inline void PropertyInlineCache::removeUsedRegister(GPRReg reg)
     downcast<RepatchingPropertyInlineCache>(*this).m_usedRegisters.remove(reg);
 }
 
+#endif // ENABLE(JIT)
+
 inline auto appropriateGetByIdOptimizeFunction(AccessType type) -> decltype(&operationGetByIdOptimize)
 {
     switch (type) {
     case AccessType::GetById:
         return operationGetByIdOptimize;
+#if ENABLE(JIT)
+    // GetByIdDirect/GetPrivateNameById still live in the gated jit/JITOperations.h. A later milestone
+    // that lets those access types dispatch from LLInt has to relocate them like GetById.
     case AccessType::GetByIdDirect:
         return operationGetByIdDirectOptimize;
     case AccessType::GetPrivateNameById:
         return operationGetPrivateNameByIdOptimize;
+#endif
     case AccessType::GetByIdWithThis:
     default:
         ASSERT_NOT_REACHED();
@@ -749,6 +777,7 @@ inline auto appropriateGetByIdOptimizeFunction(AccessType type) -> decltype(&ope
     }
 }
 
+#if ENABLE(JIT)
 inline auto appropriateGetByIdGenericFunction(AccessType type) -> decltype(&operationGetByIdGeneric)
 {
     switch (type) {
@@ -787,6 +816,7 @@ inline auto appropriatePutByIdOptimizeFunction(AccessType type) -> decltype(&ope
     RELEASE_ASSERT_NOT_REACHED();
     return nullptr;
 }
+#endif // ENABLE(JIT)
 
 inline bool hasConstantIdentifier(AccessType accessType)
 {
@@ -869,5 +899,3 @@ template<typename T> struct HashTraits;
 template<> struct HashTraits<JSC::AccessType> : public StrongEnumHashTraits<JSC::AccessType> { };
 
 } // namespace WTF
-
-#endif // ENABLE(JIT)
