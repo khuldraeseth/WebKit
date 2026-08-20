@@ -298,6 +298,7 @@ bytecode/SpeculatedType.cpp
 bytecode/StructureSet.cpp
 bytecode/PropertyInlineCacheClearingWatchpoint.cpp
 bytecode/PropertyInlineCache.cpp
+bytecode/PropertyInlineCacheOperations.cpp
 bytecode/PropertyInlineCacheSummary.cpp
 bytecode/SuperSampler.cpp
 bytecode/ToThisStatus.cpp

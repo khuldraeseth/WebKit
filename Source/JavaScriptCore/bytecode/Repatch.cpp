@@ -327,7 +327,13 @@ static void repatchSlowPathCall(CodeBlock* codeBlock, PropertyInlineCache& prope
         handlerIC->m_slowOperation = newCalleeFunction.retagged<OperationPtrTag>();
         return;
     }
+#if ENABLE(JIT)
     ftlThunkAwareRepatchCall(codeBlock, downcast<RepatchingPropertyInlineCache>(propertyCache).m_slowPathCallLocation, newCalleeFunction);
+#else
+    // Repatching ICs are JIT-only, so a non-JIT PropertyInlineCache is always a HandlerIC.
+    UNUSED_PARAM(codeBlock);
+    RELEASE_ASSERT_NOT_REACHED();
+#endif
 }
 
 enum InlineCacheAction {
@@ -490,6 +496,9 @@ static InlineCacheAction tryCacheGetBy(JSGlobalObject* globalObject, CodeBlock* 
         if (propertyName == vm.propertyNames->length) {
             auto lengthPropertyName = CacheableIdentifier::createFromImmortalIdentifier(vm.propertyNames->length.impl());
             if (isJSArray(baseCell)) {
+#if ENABLE(JIT)
+                // Inline patching needs the assembler, and InlineAccess declines for HandlerICs anyway,
+                // so a non-JIT build always falls through to building an AccessCase.
                 if (propertyCache.cacheType() == CacheType::Unset
                     && slot.slotBase() == baseCell
                     && InlineAccess::isCacheableArrayLength(propertyCache, uncheckedDowncast<JSArray>(baseCell))) {
@@ -500,9 +509,11 @@ static InlineCacheAction tryCacheGetBy(JSGlobalObject* globalObject, CodeBlock* 
                         return RetryCacheLater;
                     }
                 }
+#endif
 
                 newCase = AccessCase::create(vm, codeBlock, AccessCase::ArrayLength, lengthPropertyName);
             } else if (isJSString(baseCell)) {
+#if ENABLE(JIT)
                 if (propertyCache.cacheType() == CacheType::Unset
                     && InlineAccess::isCacheableStringLength(propertyCache)) {
                     bool generatedCodeInline = InlineAccess::generateStringLength(propertyCache);
@@ -512,6 +523,7 @@ static InlineCacheAction tryCacheGetBy(JSGlobalObject* globalObject, CodeBlock* 
                         return RetryCacheLater;
                     }
                 }
+#endif
 
                 newCase = AccessCase::create(vm, codeBlock, AccessCase::StringLength, lengthPropertyName);
             } else if (DirectArguments* arguments = dynamicDowncast<DirectArguments>(baseCell)) {
@@ -578,6 +590,7 @@ static InlineCacheAction tryCacheGetBy(JSGlobalObject* globalObject, CodeBlock* 
             if (action != AttemptToCache)
                 return action;
 
+#if ENABLE(JIT)
             // Optimize self access.
             if (propertyCache.cacheType() == CacheType::Unset
                 && slot.isCacheableValue()
@@ -594,6 +607,7 @@ static InlineCacheAction tryCacheGetBy(JSGlobalObject* globalObject, CodeBlock* 
                     return RetryCacheLater;
                 }
             }
+#endif
 
             RefPtr<PolyProtoAccessChain> prototypeAccessChain;
 

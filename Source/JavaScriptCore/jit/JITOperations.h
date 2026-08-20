@@ -182,7 +182,6 @@ JSC_DECLARE_NOEXCEPT_JIT_OPERATION(operationThrowOutOfMemoryError, void, (VM*));
 //
 // So, 1-3 functions take PropertyInlineCache* since it is IC slow path. Generic one does not.
 
-JSC_DECLARE_JIT_OPERATION(operationGetByIdOptimize, EncodedJSValue, (EncodedJSValue, PropertyInlineCache*));
 JSC_DECLARE_JIT_OPERATION(operationGetByIdMegamorphic, EncodedJSValue, (EncodedJSValue, PropertyInlineCache*));
 JSC_DECLARE_JIT_OPERATION(operationGetByIdGaveUp, EncodedJSValue, (EncodedJSValue, PropertyInlineCache*));
 JSC_DECLARE_JIT_OPERATION(operationGetByIdGeneric, EncodedJSValue, (JSGlobalObject*, EncodedJSValue, uintptr_t));

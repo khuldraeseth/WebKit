@@ -79,6 +79,7 @@ WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 #include "PropertyName.h"
 #include "PropertyNameInlines.h"
 #include "RegExpObject.h"
+#include "PropertyInlineCacheOperationsInlines.h"
 #include "RepatchInlines.h"
 #include "ShadowChicken.h"
 #include "SuperSampler.h"
@@ -92,26 +93,6 @@ IGNORE_WARNINGS_BEGIN("frame-address")
 namespace JSC {
 
 
-
-ALWAYS_INLINE ICSlowPathCallFrameTracer::ICSlowPathCallFrameTracer(VM& vm, CallFrame* callFrame, PropertyInlineCache* propertyCache)
-#if ASSERT_ENABLED
-    : m_vm(vm)
-#endif
-{
-    UNUSED_PARAM(vm);
-    UNUSED_PARAM(callFrame);
-    ASSERT(callFrame);
-    ASSERT(reinterpret_cast<void*>(callFrame) < reinterpret_cast<void*>(vm.topEntryFrame));
-    assertStackPointerIsAligned();
-#if USE(BUILTIN_FRAME_ADDRESS)
-    // If ASSERT_ENABLED and USE(BUILTIN_FRAME_ADDRESS), prepareCallOperation() will put the frame pointer into vm.topCallFrame.
-    // We can ensure here that a call to prepareCallOperation() (or its equivalent) is not missing by comparing vm.topCallFrame to
-    // the result of __builtin_frame_address which is passed in as callFrame.
-    ASSERT(vm.topCallFrame == callFrame);
-    vm.topCallFrame = callFrame;
-#endif
-    callFrame->setCallSiteIndex(propertyCache->callSiteIndex);
-}
 
 ALWAYS_INLINE JSValue profiledAdd(JSGlobalObject* globalObject, JSValue op1, JSValue op2, BinaryArithProfile& arithProfile)
 {
@@ -511,31 +492,6 @@ JSC_DEFINE_JIT_OPERATION(operationGetByIdGeneric, EncodedJSValue, (JSGlobalObjec
     LOG_IC((ICEvent::OperationGetByIdGeneric, baseValue.classInfoOrNull(), baseValue == slot.slotBase()));
     
     OPERATION_RETURN(scope, JSValue::encode(result));
-}
-
-JSC_DEFINE_JIT_OPERATION(operationGetByIdOptimize, EncodedJSValue, (EncodedJSValue base, PropertyInlineCache* propertyCache))
-{
-    SuperSamplerScope superSamplerScope(false);
-
-    JSGlobalObject* globalObject = propertyCache->globalObject();
-    VM& vm = globalObject->vm();
-    CallFrame* callFrame = DECLARE_CALL_FRAME(vm);
-    ICSlowPathCallFrameTracer tracer(vm, callFrame, propertyCache);
-    auto scope = DECLARE_THROW_SCOPE(vm);
-
-    CacheableIdentifier identifier = propertyCache->identifier();
-
-    JSValue baseValue = JSValue::decode(base);
-
-    OPERATION_RETURN(scope, JSValue::encode(baseValue.getPropertySlot(globalObject, identifier, [&] (bool found, PropertySlot& slot) -> JSValue {
-        
-        LOG_IC((ICEvent::OperationGetByIdOptimize, baseValue.classInfoOrNull(), baseValue == slot.slotBase()));
-        
-        CodeBlock* codeBlock = callFrame->codeBlock();
-        if (propertyCache->considerRepatchingCacheBy(vm, codeBlock, baseValue.structureOrNull(), identifier))
-            repatchGetBy(globalObject, codeBlock, baseValue, identifier, slot, *propertyCache, GetByKind::ById, /* isNonStringPrimitiveKey */ false);
-        return found ? slot.getValue(globalObject, identifier) : jsUndefined();
-    })));
 }
 
 JSC_DEFINE_JIT_OPERATION(operationGetByIdWithThisGaveUp, EncodedJSValue, (EncodedJSValue base, EncodedJSValue thisEncoded, PropertyInlineCache* propertyCache))

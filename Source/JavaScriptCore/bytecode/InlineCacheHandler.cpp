@@ -39,11 +39,23 @@
 #include "ModuleNamespaceAccessCase.h"
 #include "PropertyInlineCache.h"
 #include "SharedJITStubSet.h"
+#include "StructureInlines.h"
 
 namespace JSC {
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(InlineCacheHandler);
 WTF_MAKE_TZONE_ALLOCATED_IMPL(InlineCacheHandlerWithJSCall);
+
+CacheType prepareGetByIdLoadNode(VM& vm, const AccessCase& accessCase)
+{
+    // The property lives on the receiver for a self access and on the alternate base otherwise, so arm
+    // the replacement watchpoint on whichever structure actually holds it.
+    JSObject* alternateBase = accessCase.tryGetAlternateBase();
+    Structure* holderStructure = alternateBase ? alternateBase->structure() : accessCase.structure();
+    if (isValidOffset(accessCase.offset()))
+        holderStructure->startWatchingPropertyForReplacements(vm, accessCase.offset());
+    return alternateBase ? CacheType::GetByIdPrototype : CacheType::GetByIdSelf;
+}
 
 // Milestone 1: choose the static offlineasm handler that LLInt's op_get_by_id dispatches to for a
 // given node. Only GetByIdSelf / GetByIdPrototype are interpreted inline in LLInt; every other

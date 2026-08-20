@@ -33,6 +33,7 @@
 #include "MacroAssembler.h"
 #include "Options.h"
 #include "PropertyInlineCacheClearingWatchpoint.h"
+#include "PropertyInlineCacheOperations.h"
 #include "PropertyInlineCacheSummary.h"
 #include "RegisterSet.h"
 #include "Structure.h"

@@ -52,6 +52,12 @@ enum class CacheType : int8_t {
     StringLength,
 };
 
+// Arms the replacement watchpoint for a get-by-id Load/GetGetter whose conditions are all
+// watchpoint-backed, and returns the CacheType the resulting node carries. Shared by the
+// precompiled-thunk path and the codegen-free LLInt path so the two cannot disagree. The sibling
+// branches in compileOneAccessCaseHandler arm the same watchpoint but need no CacheType.
+CacheType prepareGetByIdLoadNode(VM&, const AccessCase&);
+
 class JSC_CACHE_LINE_ALIGNED InlineCacheHandler : public RefCounted<InlineCacheHandler> {
     WTF_MAKE_NONCOPYABLE(InlineCacheHandler);
     WTF_MAKE_TZONE_ALLOCATED(InlineCacheHandler);

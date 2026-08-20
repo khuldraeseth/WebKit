@@ -7513,21 +7513,11 @@ AccessGenerationResult InlineCacheCompiler::compileOneAccessCaseHandler(const Ve
                     if (!accessCase.viaGlobalProxy()) {
                         collectConditions(accessCase, watchedConditions, checkingConditions);
                         if (checkingConditions.isEmpty()) {
-                            Structure* currStructure = accessCase.structure();
-                            if (auto* object = accessCase.tryGetAlternateBase())
-                                currStructure = object->structure();
-                            if (isValidOffset(accessCase.m_offset))
-                                currStructure->startWatchingPropertyForReplacements(vm, accessCase.offset());
-
-                            MacroAssemblerCodeRef<JITStubRoutinePtrTag> code;
-                            CacheType cacheType = CacheType::Unset;
-                            if (!accessCase.tryGetAlternateBase()) {
-                                cacheType = CacheType::GetByIdSelf;
-                                code = vm.getCTIStub(CommonJITThunkID::GetByIdLoadOwnPropertyHandler).retagged<JITStubRoutinePtrTag>();
-                            } else {
-                                cacheType = CacheType::GetByIdPrototype;
-                                code = vm.getCTIStub(CommonJITThunkID::GetByIdLoadPrototypePropertyHandler).retagged<JITStubRoutinePtrTag>();
-                            }
+                            CacheType cacheType = prepareGetByIdLoadNode(vm, accessCase);
+                            auto thunkID = cacheType == CacheType::GetByIdSelf
+                                ? CommonJITThunkID::GetByIdLoadOwnPropertyHandler
+                                : CommonJITThunkID::GetByIdLoadPrototypePropertyHandler;
+                            auto code = vm.getCTIStub(thunkID).retagged<JITStubRoutinePtrTag>();
                             auto stub = createPreCompiledICJITStubRoutine(WTF::move(code), vm, codeBlock);
                             connectWatchpointSets(stub.get(), WTF::move(watchedConditions), WTF::move(additionalWatchpointSets));
                             return finishPreCompiledCodeGeneration(WTF::move(stub), cacheType);
