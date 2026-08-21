@@ -28,9 +28,9 @@
 #include "ModuleNamespaceAccessCase.h"
 
 #if ENABLE(JIT)
-
 #include "CCallHelpers.h"
 #include "InlineCacheCompiler.h"
+#endif
 #include "JSModuleEnvironment.h"
 #include "JSModuleNamespaceObject.h"
 #include "PropertyInlineCache.h"
@@ -52,4 +52,3 @@ Ref<AccessCase> ModuleNamespaceAccessCase::create(VM& vm, JSCell* owner, Cacheab
 
 } // namespace JSC
 
-#endif // ENABLE(JIT)

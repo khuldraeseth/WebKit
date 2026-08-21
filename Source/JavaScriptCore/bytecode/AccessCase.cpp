@@ -26,28 +26,29 @@
 #include "config.h"
 #include "AccessCase.h"
 
-#if ENABLE(JIT)
-
-#include "CCallHelpers.h"
 #include "CacheableIdentifierInlines.h"
-#include "CallLinkInfo.h"
 #include "DirectArguments.h"
 #include "GetterSetter.h"
 #include "GetterSetterAccessCase.h"
-#include "InlineCacheCompiler.h"
 #include "InstanceOfAccessCase.h"
 #include "IntrinsicGetterAccessCase.h"
 #include "JSCInlines.h"
 #include "JSModuleEnvironment.h"
 #include "JSModuleNamespaceObject.h"
-#include "LLIntThunks.h"
-#include "LinkBuffer.h"
 #include "ModuleNamespaceAccessCase.h"
 #include "PropertyInlineCache.h"
 #include "ScopedArguments.h"
-#include "ScratchRegisterAllocator.h"
 #include "SuperSampler.h"
+
+#if ENABLE(JIT)
+#include "CCallHelpers.h"
+#include "CallLinkInfo.h"
+#include "InlineCacheCompiler.h"
+#include "LLIntThunks.h"
+#include "LinkBuffer.h"
+#include "ScratchRegisterAllocator.h"
 #include "ThunkGenerators.h"
+#endif
 
 namespace JSC {
 
@@ -224,6 +225,13 @@ RefPtr<AccessCase> AccessCase::createTransition(
     // Skip optimizing the case where we need a realloc, if we don't have
     // enough registers to make it happen.
     if (oldStructure->outOfLineCapacity() != newStructure->outOfLineCapacity()) {
+#if !ENABLE(JIT)
+        // Reallocating transitions are only ever served by generated code, and the register budget this
+        // checks against is a codegen concern. Decline to cache them rather than hand back a case that
+        // nothing can serve.
+        UNUSED_PARAM(propertyCache);
+        return nullptr;
+#else
         // In 64 bits jsc uses 1 register for value, and it uses 2 registers in 32 bits
         size_t requiredRegisters = 1; // propertyCache.valueRegs()
 #if USE(JSVALUE32_64)
@@ -261,6 +269,7 @@ RefPtr<AccessCase> AccessCase::createTransition(
         // If we are (re)allocating inline, jsc needs two extra scratchGPRs
         if (!oldStructure->couldHaveIndexingHeader() && GPRInfo::numberOfRegisters < (requiredRegisters + 2))
             return nullptr;
+#endif // !ENABLE(JIT)
     }
 
     return adoptRef(*new AccessCase(vm, owner, Transition, identifier, offset, newStructure, conditionSet, WTF::move(prototypeAccessChain)));
@@ -1864,5 +1873,3 @@ JSObject* AccessCase::tryGetAlternateBase() const
 }
 
 } // namespace JSC
-
-#endif

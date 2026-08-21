@@ -25,8 +25,6 @@
 
 #pragma once
 
-#if ENABLE(JIT)
-
 #include "MacroAssemblerCodeRef.h"
 #include "ProxyableAccessCase.h"
 
@@ -67,4 +65,3 @@ private:
 
 } // namespace JSC
 
-#endif // ENABLE(JIT)

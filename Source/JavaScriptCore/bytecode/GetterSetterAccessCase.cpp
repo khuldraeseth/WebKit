@@ -26,8 +26,6 @@
 #include "config.h"
 #include "GetterSetterAccessCase.h"
 
-#if ENABLE(JIT)
-
 #include "JSCJSValueInlines.h"
 
 namespace JSC {
@@ -86,4 +84,3 @@ void GetterSetterAccessCase::dumpImpl(PrintStream& out, CommaPrinter& comma, Ind
 
 } // namespace JSC
 
-#endif // ENABLE(JIT)

@@ -26,8 +26,6 @@
 #include "config.h"
 #include "IntrinsicGetterAccessCase.h"
 
-#if ENABLE(JIT)
-
 #include "HeapInlines.h"
 #include "JSCellInlines.h"
 #include "JSTypedArrays.h"
@@ -61,4 +59,3 @@ bool IntrinsicGetterAccessCase::doesCalls() const
 
 } // namespace JSC
 
-#endif // ENABLE(JIT)

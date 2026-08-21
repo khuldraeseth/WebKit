@@ -25,8 +25,6 @@
 
 #pragma once
 
-#if ENABLE(JIT)
-
 #include "AccessCase.h"
 
 namespace JSC {
@@ -55,5 +53,4 @@ private:
 
 } // namespace JSC
 
-#endif // ENABLE(JIT)
 

@@ -26,8 +26,6 @@
 #include "config.h"
 #include "InstanceOfAccessCase.h"
 
-#if ENABLE(JIT)
-
 #include "JSCJSValueInlines.h"
 
 namespace JSC {
@@ -56,5 +54,4 @@ InstanceOfAccessCase::InstanceOfAccessCase(
 
 } // namespace JSC
 
-#endif // ENABLE(JIT)
 

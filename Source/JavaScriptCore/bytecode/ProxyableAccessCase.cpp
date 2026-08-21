@@ -26,8 +26,6 @@
 #include "config.h"
 #include "ProxyableAccessCase.h"
 
-#if ENABLE(JIT)
-
 namespace JSC {
 
 ProxyableAccessCase::ProxyableAccessCase(VM& vm, JSCell* owner, AccessType accessType, CacheableIdentifier identifier, PropertyOffset offset, Structure* structure,
@@ -53,4 +51,3 @@ void ProxyableAccessCase::dumpImpl(PrintStream& out, CommaPrinter& comma, Indent
 
 } // namespace JSC
 
-#endif // ENABLE(JIT)
