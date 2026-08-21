@@ -825,7 +825,7 @@ void HandlerPropertyInlineCache::initializeFromUnlinkedPropertyInlineCache(VM& v
     m_globalObject = codeBlock->globalObject();
     callSiteIndex = CallSiteIndex(BytecodeIndex(unlinkedPropertyCache.bytecodeIndex.offset()));
     codeOrigin = CodeOrigin(unlinkedPropertyCache.bytecodeIndex);
-    initializeWithUnitHandler(codeBlock, InlineCacheCompiler::generateSlowPathHandler(vm, accessType));
+    initializeWithUnitHandler(codeBlock, InlineCacheHandler::sharedSlowPathHandler(vm, accessType));
     propertyIsInt32 = unlinkedPropertyCache.propertyIsInt32;
     canBeMegamorphic = unlinkedPropertyCache.canBeMegamorphic;
 
@@ -850,7 +850,7 @@ void HandlerPropertyInlineCache::initializeForMetadataResidentGetById(VM& vm, Co
     // ICSlowPathCallFrameTracer write the correct CallSiteIndex for LLInt exception unwinding.
     callSiteIndex = CallSiteIndex(bytecodeIndex);
     codeOrigin = CodeOrigin(bytecodeIndex);
-    initializeWithUnitHandler(codeBlock, InlineCacheCompiler::generateSlowPathHandler(vm, AccessType::GetById));
+    initializeWithUnitHandler(codeBlock, InlineCacheHandler::sharedSlowPathHandler(vm, AccessType::GetById));
     m_slowOperation = operationGetByIdOptimize;
     initializePredefinedRegisters();
 }
@@ -876,7 +876,7 @@ void HandlerPropertyInlineCache::initializeFromDFGUnlinkedPropertyInlineCache(Co
         m_globalObject = baselineCodeBlockForInlineCallFrame(codeOrigin.inlineCallFrame())->globalObject();
     else
         m_globalObject = codeBlock->globalObject();
-    initializeWithUnitHandler(codeBlock, InlineCacheCompiler::generateSlowPathHandler(codeBlock->vm(), accessType));
+    initializeWithUnitHandler(codeBlock, InlineCacheHandler::sharedSlowPathHandler(codeBlock->vm(), accessType));
 
     propertyIsInt32 = unlinkedPropertyCache.propertyIsInt32;
     propertyIsSymbol = unlinkedPropertyCache.propertyIsSymbol;
@@ -989,7 +989,7 @@ void PropertyInlineCache::resetStubAsJumpInAccess(CodeBlock* codeBlock)
             cursor->removeOwner(codeBlock);
             cursor = cursor->next();
         }
-        m_handler = InlineCacheCompiler::generateSlowPathHandler(codeBlock->vm(), accessType);
+        m_handler = InlineCacheHandler::sharedSlowPathHandler(codeBlock->vm(), accessType);
         return;
     }
 

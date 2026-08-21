@@ -26,25 +26,28 @@
 #include "config.h"
 #include "InlineCacheHandler.h"
 
-#if ENABLE(JIT)
-
 #include "CacheableIdentifierInlines.h"
 #include "CodeBlock.h"
 #include "GetterSetterAccessCase.h"
-#include "InlineCacheCompiler.h"
 #include "InstanceOfAccessCase.h"
 #include "JSModuleEnvironment.h"
 #include "JSModuleNamespaceObject.h"
 #include "LLIntData.h"
 #include "ModuleNamespaceAccessCase.h"
 #include "PropertyInlineCache.h"
-#include "SharedJITStubSet.h"
 #include "StructureInlines.h"
+
+#if ENABLE(JIT)
+#include "InlineCacheCompiler.h"
+#include "SharedJITStubSet.h"
+#endif
 
 namespace JSC {
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(InlineCacheHandler);
+#if ENABLE(JIT)
 WTF_MAKE_TZONE_ALLOCATED_IMPL(InlineCacheHandlerWithJSCall);
+#endif
 
 CacheType prepareGetByIdLoadNode(VM& vm, const AccessCase& accessCase)
 {
@@ -71,7 +74,10 @@ CacheType prepareGetByIdLoadNode(VM& vm, const AccessCase& accessCase)
 // `ldp fp, lr, [sp], #16` in emitDataICRestoreAfterCall then faults. Skipping is always semantically
 // safe: a skipped node simply behaves as a cache miss, and the walk ends at the terminal slow-path
 // node, which calls operationGetByIdOptimize and computes the correct result.
-static CodePtr<JITStubRoutinePtrTag> llintCallTargetForHandler(CacheType cacheType, bool makesJSCalls)
+// Unused without the JIT until the codegen-free node factory lands: today the only caller is the
+// stub-taking constructor, and the terminal factories set m_llintCallTarget to the generic handler
+// directly. Kept out of the gate so that factory does not have to un-gate it.
+[[maybe_unused]] static CodePtr<JITStubRoutinePtrTag> llintCallTargetForHandler(CacheType cacheType, bool makesJSCalls)
 {
     // makesJSCalls() nodes (getter/setter/custom/proxy/megamorphic-getter) MUST NOT be entered from
     // LLInt, for the jitDataRegister reason above. This branch MUST come first so a WithJSCall node
@@ -108,8 +114,12 @@ static CodePtr<JITStubRoutinePtrTag> llintJumpTargetForCallTarget(CodePtr<JITStu
 
 void InlineCacheHandler::dump(PrintStream& out) const
 {
+#if ENABLE(JIT)
     if (m_callTarget)
         out.print(m_callTarget);
+#else
+    out.print(m_llintCallTarget);
+#endif
 }
 
 
@@ -118,6 +128,7 @@ InlineCacheHandler::InlineCacheHandler()
     disableThreadingChecks();
 }
 
+#if ENABLE(JIT)
 WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 InlineCacheHandler::InlineCacheHandler(bool makesJSCalls, Ref<InlineCacheHandler>&& previous, Ref<PolymorphicAccessJITStubRoutine>&& stubRoutine, std::unique_ptr<PropertyInlineCacheClearingWatchpoint>&& watchpoint, CacheType cacheType)
     : m_next(WTF::move(previous))
@@ -138,18 +149,22 @@ InlineCacheHandlerWithJSCall::InlineCacheHandlerWithJSCall(Ref<InlineCacheHandle
     : InlineCacheHandler(true, WTF::move(previous), WTF::move(stubRoutine), WTF::move(watchpoint), cacheType)
 {
 }
+#endif // ENABLE(JIT)
 
 void InlineCacheHandler::operator delete(InlineCacheHandler* handler, std::destroying_delete_t)
 {
+#if ENABLE(JIT)
     if (auto* withJSCall = dynamicDowncast<InlineCacheHandlerWithJSCall>(handler)) {
         std::destroy_at(withJSCall);
         InlineCacheHandlerWithJSCall::freeAfterDestruction(withJSCall);
-    } else {
-        std::destroy_at(handler);
-        InlineCacheHandler::freeAfterDestruction(handler);
+        return;
     }
+#endif
+    std::destroy_at(handler);
+    InlineCacheHandler::freeAfterDestruction(handler);
 }
 
+#if ENABLE(JIT)
 Ref<InlineCacheHandler> InlineCacheHandler::create(Ref<InlineCacheHandler>&& previous, CodeBlock* codeBlock, PropertyInlineCache& propertyCache, Ref<PolymorphicAccessJITStubRoutine>&& stubRoutine, std::unique_ptr<PropertyInlineCacheClearingWatchpoint>&& watchpoint, unsigned callLinkInfoCount)
 {
     VM& vm = codeBlock->vm();
@@ -259,14 +274,22 @@ Ref<InlineCacheHandler> InlineCacheHandler::createNonHandlerSlowPath(CodePtr<JIT
     result->m_llintJumpTarget = llintJumpTargetForCallTarget(result->m_llintCallTarget);
     return result;
 }
+#endif // ENABLE(JIT)
 
 WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
 Ref<InlineCacheHandler> InlineCacheHandler::createSlowPath(VM& vm, AccessType accessType)
 {
     auto result = adoptRef(*new InlineCacheHandler);
+#if ENABLE(JIT)
     auto codeRef = InlineCacheCompiler::generateSlowPathCode(vm, accessType);
     result->m_callTarget = codeRef.code().template retagged<JITStubRoutinePtrTag>();
     result->m_jumpTarget = CodePtr<NoPtrTag> { codeRef.retaggedCode<NoPtrTag>().dataLocation<uint8_t*>() + prologueSizeInBytesDataIC }.template retagged<JITStubRoutinePtrTag>();
+#else
+    // No compiled chain to enter, so the node carries only its LLInt entry: the generic handler calls
+    // operationGetByIdOptimize directly instead of tail-jumping into a thunk.
+    UNUSED_PARAM(vm);
+    UNUSED_PARAM(accessType);
+#endif
     // Milestone 1: this VM-shared terminal node is reached by LLInt op_get_by_id via the generic
     // handler tail-jump. Only op_get_by_id reads m_llintCallTarget today, so stamping the get_by_id
     // generic handler onto every access type's shared node is safe. A future milestone that lets
@@ -277,14 +300,24 @@ Ref<InlineCacheHandler> InlineCacheHandler::createSlowPath(VM& vm, AccessType ac
 }
 WTF_ALLOW_UNSAFE_BUFFER_USAGE_END
 
-Ref<InlineCacheHandler> InlineCacheCompiler::generateSlowPathHandler(VM& vm, AccessType accessType)
+Ref<InlineCacheHandler> InlineCacheHandler::sharedSlowPathHandler(VM& vm, AccessType accessType)
 {
     ASSERT(!isCompilationThread());
+#if ENABLE(JIT)
     if (auto handler = vm.m_sharedJITStubs->getSlowPathHandler(accessType))
         return handler.releaseNonNull();
     auto handler = InlineCacheHandler::createSlowPath(vm, accessType);
     vm.m_sharedJITStubs->setSlowPathHandler(accessType, handler);
     return handler;
+#else
+    // Only op_get_by_id reaches a terminal node without the JIT, so one cached node covers every
+    // caller. Assert rather than key on accessType, so a future opcode joining the LLInt path has to
+    // widen this deliberately.
+    ASSERT(accessType == AccessType::GetById);
+    if (!vm.m_llintSlowPathHandler)
+        vm.m_llintSlowPathHandler = InlineCacheHandler::createSlowPath(vm, accessType);
+    return *vm.m_llintSlowPathHandler;
+#endif
 }
 
 template<typename Visitor>
@@ -307,8 +340,10 @@ DEFINE_VISIT_AGGREGATE(InlineCacheHandler);
 
 void InlineCacheHandler::aboutToDie()
 {
+#if ENABLE(JIT)
     if (m_stubRoutine)
         m_stubRoutine->aboutToDie();
+#endif
     // A reference to InlineCacheHandler may keep it alive later than the CodeBlock that "owns" this
     // watchpoint but the watchpoint must not fire after the CodeBlock has finished destruction,
     // so clear the watchpoint eagerly.
@@ -318,32 +353,44 @@ void InlineCacheHandler::aboutToDie()
 bool InlineCacheHandler::visitWeak(VM& vm)
 {
     bool isValid = true;
+#if ENABLE(JIT)
     if (auto* withJSCall = dynamicDowncast<InlineCacheHandlerWithJSCall>(*this))
         withJSCall->m_callLinkInfo.visitWeak(vm);
+#endif
 
     if (m_accessCase)
         isValid &= m_accessCase->visitWeak(vm);
 
+#if ENABLE(JIT)
     if (m_stubRoutine)
         isValid &= m_stubRoutine->visitWeak(vm);
+#endif
 
     return isValid;
 }
 
+// Ownership tracking exists so a CodeBlock can keep its generated stubs alive; a node with no stub
+// routine has nothing to track, which is every node without the JIT.
 void InlineCacheHandler::addOwner(CodeBlock* codeBlock)
 {
+#if ENABLE(JIT)
     if (!m_stubRoutine)
         return;
     m_stubRoutine->addOwner(codeBlock);
+#else
+    UNUSED_PARAM(codeBlock);
+#endif
 }
 
 void InlineCacheHandler::removeOwner(CodeBlock* codeBlock)
 {
+#if ENABLE(JIT)
     if (!m_stubRoutine)
         return;
     m_stubRoutine->removeOwner(codeBlock);
+#else
+    UNUSED_PARAM(codeBlock);
+#endif
 }
 
 } // namespace JSC
-
-#endif // ENABLE(JIT)

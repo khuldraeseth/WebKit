@@ -131,6 +131,7 @@ class JSPromise;
 class JSPropertyNameEnumerator;
 class JITSizeStatistics;
 class JITThunks;
+class InlineCacheHandler;
 class MegamorphicCache;
 class MicrotaskCallCache;
 class MicrotaskQueue;
@@ -745,6 +746,12 @@ public:
     MacroAssemblerCodeRef<JITThunkPtrTag> getCTIStub(ThunkGenerator);
     MacroAssemblerCodeRef<JITThunkPtrTag> getCTIStub(CommonJITThunkID);
     std::unique_ptr<SharedJITStubSet> m_sharedJITStubs;
+#else
+    // Without the JIT there is no SharedJITStubSet to intern the Handler IC's terminal node in, and
+    // only op_get_by_id dispatches through it, so one shared node per VM is enough. Held here rather
+    // than narrowing SharedJITStubSet's gate: that class exists to intern compiled stubs, of which a
+    // non-JIT build has none.
+    RefPtr<InlineCacheHandler> m_llintSlowPathHandler;
 #endif
 #if ENABLE(FTL_JIT)
     std::unique_ptr<FTL::Thunks> ftlThunks;

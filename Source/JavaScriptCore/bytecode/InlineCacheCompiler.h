@@ -269,7 +269,6 @@ public:
     AccessGenerationResult compileHandler(const GCSafeConcurrentJSLocker&, Vector<AccessCase*, 16>&&, CodeBlock*, AccessCase&);
 
     static MacroAssemblerCodeRef<JITThunkPtrTag> generateSlowPathCode(VM&, AccessType);
-    static Ref<InlineCacheHandler> generateSlowPathHandler(VM&, AccessType);
 
     static void NODELETE emitDataICPrologue(CCallHelpers&);
     static void NODELETE emitDataICEpilogue(CCallHelpers&);
@@ -426,23 +425,6 @@ MacroAssemblerCodeRef<JITThunkPtrTag> checkPrivateBrandHandler(VM&);
 MacroAssemblerCodeRef<JITThunkPtrTag> setPrivateBrandHandler(VM&);
 
 bool NODELETE doesJSCalls(AccessCase::AccessType);
-
-#if CPU(X86_64)
-static constexpr size_t prologueSizeInBytesDataIC = 1;
-#elif CPU(ARM64E)
-static constexpr size_t prologueSizeInBytesDataIC = 4;
-#elif CPU(ARM64)
-static constexpr size_t prologueSizeInBytesDataIC = 0;
-#elif CPU(ARM_THUMB2)
-static constexpr size_t prologueSizeInBytesDataIC = 0;
-#elif CPU(RISCV64)
-static constexpr size_t prologueSizeInBytesDataIC = 0;
-#else
-// The CPUs that get C_LOOP have no entry above, and C_LOOP emits no DataIC prologue: backends are
-// mutually exclusive offlineasm settings, so getByIdLLIntHandlerPrologue's X86_64/ARM64 tests are
-// both false under the C_LOOP backend whatever the host CPU is.
-static constexpr size_t prologueSizeInBytesDataIC = 0;
-#endif
 
 } // namespace JSC
 

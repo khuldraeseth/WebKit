@@ -63,6 +63,25 @@ enum class CacheType : int8_t {
 // branches in compileOneAccessCaseHandler arm the same watchpoint but need no CacheType.
 CacheType prepareGetByIdLoadNode(VM&, const AccessCase&);
 
+// Size of the DataIC prologue a handler's call entry runs. Needed without the JIT too: LLInt's
+// per-node jump target is callTarget + this, so the prologue runs once per chain traversal.
+#if CPU(X86_64)
+static constexpr size_t prologueSizeInBytesDataIC = 1;
+#elif CPU(ARM64E)
+static constexpr size_t prologueSizeInBytesDataIC = 4;
+#elif CPU(ARM64)
+static constexpr size_t prologueSizeInBytesDataIC = 0;
+#elif CPU(ARM_THUMB2)
+static constexpr size_t prologueSizeInBytesDataIC = 0;
+#elif CPU(RISCV64)
+static constexpr size_t prologueSizeInBytesDataIC = 0;
+#else
+// The CPUs that get C_LOOP have no entry above, and C_LOOP emits no DataIC prologue: backends are
+// mutually exclusive offlineasm settings, so getByIdLLIntHandlerPrologue's X86_64/ARM64 tests are
+// both false under the C_LOOP backend whatever the host CPU is.
+static constexpr size_t prologueSizeInBytesDataIC = 0;
+#endif
+
 class JSC_CACHE_LINE_ALIGNED InlineCacheHandler : public RefCounted<InlineCacheHandler> {
     WTF_MAKE_NONCOPYABLE(InlineCacheHandler);
     WTF_MAKE_TZONE_ALLOCATED(InlineCacheHandler);
@@ -102,6 +121,11 @@ public:
     void dump(PrintStream&) const;
 
     static Ref<InlineCacheHandler> createNonHandlerSlowPath(CodePtr<JITStubRoutinePtrTag>);
+
+    // The VM-shared terminal node for an access type: the last link of every handler chain, which calls
+    // back into C++. Lives here rather than on InlineCacheCompiler because it builds a handler rather
+    // than generating code, and a non-JIT build needs it too.
+    static Ref<InlineCacheHandler> sharedSlowPathHandler(VM&, AccessType);
 
     void addOwner(CodeBlock*);
     void removeOwner(CodeBlock*);
@@ -162,9 +186,9 @@ protected:
     InlineCacheHandler();
 #if ENABLE(JIT)
     InlineCacheHandler(bool makesJSCalls, Ref<InlineCacheHandler>&&, Ref<PolymorphicAccessJITStubRoutine>&&, std::unique_ptr<PropertyInlineCacheClearingWatchpoint>&&, CacheType);
+#endif
 
     static Ref<InlineCacheHandler> createSlowPath(VM&, AccessType);
-#endif
 
     // The selection and ordering of the fields through m_uid is deliberate.
     // They are are either hot with high affinity, or placed where they are to minimize padding.
