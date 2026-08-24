@@ -29,7 +29,9 @@
 #include "BaselineJITRegisters.h"
 #include "CacheableIdentifierInlines.h"
 #include "DFGJITCode.h"
+#if ENABLE(JIT)
 #include "InlineCacheCompiler.h"
+#endif
 #include "Repatch.h"
 
 namespace JSC {
@@ -181,10 +183,19 @@ AccessGenerationResult PropertyInlineCache::addAccessCase(const GCSafeConcurrent
                 return result;
             }
 
+#if ENABLE(JIT)
             InlineCacheCompiler compiler(codeBlock->jitType(), vm, globalObject, ecmaMode, *this);
             return compiler.compileHandler(locker, WTF::move(list), codeBlock, accessCase.get());
+#else
+            // Nodes are minted by the compiler today, so without the JIT there is nothing to add: the
+            // chain stays at its terminal and every access takes the slow path. The codegen-free node
+            // factory in the next milestone is what makes this cache.
+            UNUSED_PARAM(ecmaMode);
+            return AccessGenerationResult::GaveUp;
+#endif
         }
 
+#if ENABLE(JIT)
         auto& repatchingIC = downcast<RepatchingPropertyInlineCache>(*this);
         AccessGenerationResult result;
         if (repatchingIC.m_stub) {
@@ -260,6 +271,10 @@ AccessGenerationResult PropertyInlineCache::addAccessCase(const GCSafeConcurrent
         // gather enough cases.
         bufferingCountdown = Options::repatchBufferingCountdown();
         return result;
+#else
+        // Repatching ICs are JIT-only, so a non-JIT cache is always a HandlerIC and handled above.
+        RELEASE_ASSERT_NOT_REACHED();
+#endif
     })(accessCase.releaseNonNull());
     if (result.generatedSomeCode()) {
         if (is<HandlerPropertyInlineCache>(*this))
@@ -643,6 +658,7 @@ static CodePtr<OperationPtrTag> NODELETE slowOperationFromUnlinkedPropertyInline
     return { };
 }
 
+#if ENABLE(JIT)
 void PropertyInlineCache::initializePredefinedRegisters()
 {
     switch (accessType) {
@@ -807,7 +823,9 @@ void PropertyInlineCache::initializePredefinedRegisters()
         break;
     }
 }
+#endif // ENABLE(JIT)
 
+#if ENABLE(JIT)
 void HandlerPropertyInlineCache::initializeFromUnlinkedPropertyInlineCache(VM& vm, CodeBlock* codeBlock, const BaselineUnlinkedPropertyInlineCache& unlinkedPropertyCache)
 {
     ASSERT(!isCompilationThread());
@@ -835,6 +853,7 @@ void HandlerPropertyInlineCache::initializeFromUnlinkedPropertyInlineCache(VM& v
     m_slowOperation = slowOperationFromUnlinkedPropertyInlineCache(unlinkedPropertyCache);
     initializePredefinedRegisters();
 }
+#endif // ENABLE(JIT)
 
 void HandlerPropertyInlineCache::initializeForMetadataResidentGetById(VM& vm, CodeBlock* codeBlock, CacheableIdentifier identifier, BytecodeIndex bytecodeIndex)
 {
@@ -852,10 +871,13 @@ void HandlerPropertyInlineCache::initializeForMetadataResidentGetById(VM& vm, Co
     codeOrigin = CodeOrigin(bytecodeIndex);
     initializeWithUnitHandler(codeBlock, InlineCacheHandler::sharedSlowPathHandler(vm, AccessType::GetById));
     m_slowOperation = operationGetByIdOptimize;
+#if ENABLE(JIT)
     initializePredefinedRegisters();
+#endif
 }
 
 #if ENABLE(DFG_JIT)
+#if ENABLE(JIT)
 void HandlerPropertyInlineCache::initializeFromDFGUnlinkedPropertyInlineCache(CodeBlock* codeBlock, const DFG::UnlinkedPropertyInlineCache& unlinkedPropertyCache)
 {
     ASSERT(!isCompilationThread());
@@ -891,6 +913,7 @@ void HandlerPropertyInlineCache::initializeFromDFGUnlinkedPropertyInlineCache(Co
     initializePredefinedRegisters();
 }
 #endif
+#endif // ENABLE(JIT)
 
 void HandlerPropertyInlineCache::setInlinedHandler(CodeBlock* codeBlock, Ref<InlineCacheHandler>&& handler)
 {
@@ -971,6 +994,7 @@ void PropertyInlineCache::prependHandler(CodeBlock* codeBlock, Ref<InlineCacheHa
     m_handler->addOwner(codeBlock);
 }
 
+#if ENABLE(JIT)
 void PropertyInlineCache::rewireStubAsJumpInAccess(CodeBlock* codeBlock, Ref<InlineCacheHandler>&& handler)
 {
     ASSERT(!isHandlerIC());
@@ -978,6 +1002,7 @@ void PropertyInlineCache::rewireStubAsJumpInAccess(CodeBlock* codeBlock, Ref<Inl
     initializeWithUnitHandler(codeBlock, WTF::move(handler));
     CCallHelpers::replaceWithJump(downcast<RepatchingPropertyInlineCache>(*this).startLocation.retagged<JSInternalPtrTag>(), label);
 }
+#endif // ENABLE(JIT)
 
 void PropertyInlineCache::resetStubAsJumpInAccess(CodeBlock* codeBlock)
 {
@@ -993,7 +1018,12 @@ void PropertyInlineCache::resetStubAsJumpInAccess(CodeBlock* codeBlock)
         return;
     }
 
+#if ENABLE(JIT)
     rewireStubAsJumpInAccess(codeBlock, InlineCacheHandler::createNonHandlerSlowPath(slowPathStartLocation));
+#else
+    // Repatching ICs are JIT-only, so a non-JIT cache is always a HandlerIC and returned above.
+    RELEASE_ASSERT_NOT_REACHED();
+#endif
 }
 
 Vector<AccessCase*, 16> PropertyInlineCache::listedAccessCases(const AbstractLocker&) const
