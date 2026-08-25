@@ -191,6 +191,11 @@ public:
     // than generating code, and a non-JIT build needs it too.
     static Ref<InlineCacheHandler> sharedSlowPathHandler(VM&, AccessType);
 
+    // A node carrying only data: no compiled thunk, so LLInt interprets it straight from m_cacheType.
+    // Returns null unless the access is a plain self load -- anything with conditions needs a watchpoint
+    // owner, which in a compiled node is the stub routine, and every other shape needs generated code.
+    static RefPtr<InlineCacheHandler> tryCreateDataOnlyGetByIdSelf(VM&, Ref<InlineCacheHandler>&& previous, PropertyInlineCache&, AccessCase&);
+
     void addOwner(CodeBlock*);
     void removeOwner(CodeBlock*);
 
@@ -248,6 +253,7 @@ public:
 
 protected:
     InlineCacheHandler();
+    InlineCacheHandler(Ref<InlineCacheHandler>&& previous, CacheType);
 #if ENABLE(JIT)
     InlineCacheHandler(bool makesJSCalls, Ref<InlineCacheHandler>&&, Ref<PolymorphicAccessJITStubRoutine>&&, std::unique_ptr<PropertyInlineCacheClearingWatchpoint>&&, CacheType);
 #endif

@@ -39,5 +39,6 @@ namespace JSC {
 class PropertyInlineCache;
 
 JSC_DECLARE_JIT_OPERATION(operationGetByIdOptimize, EncodedJSValue, (EncodedJSValue, PropertyInlineCache*));
+JSC_DECLARE_JIT_OPERATION(operationGetByIdGaveUp, EncodedJSValue, (EncodedJSValue, PropertyInlineCache*));
 
 } // namespace JSC

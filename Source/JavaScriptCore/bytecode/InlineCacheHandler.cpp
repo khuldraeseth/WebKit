@@ -74,10 +74,7 @@ CacheType prepareGetByIdLoadNode(VM& vm, const AccessCase& accessCase)
 // `ldp fp, lr, [sp], #16` in emitDataICRestoreAfterCall then faults. Skipping is always semantically
 // safe: a skipped node simply behaves as a cache miss, and the walk ends at the terminal slow-path
 // node, which calls operationGetByIdOptimize and computes the correct result.
-// Unused without the JIT until the codegen-free node factory lands: today the only caller is the
-// stub-taking constructor, and the terminal factories set m_llintCallTarget to the generic handler
-// directly. Kept out of the gate so that factory does not have to un-gate it.
-[[maybe_unused]] static CodePtr<JITStubRoutinePtrTag> llintCallTargetForHandler(CacheType cacheType, bool makesJSCalls)
+static CodePtr<JITStubRoutinePtrTag> llintCallTargetForHandler(CacheType cacheType, bool makesJSCalls)
 {
     // makesJSCalls() nodes (getter/setter/custom/proxy/megamorphic-getter) MUST NOT be entered from
     // LLInt, for the jitDataRegister reason above. This branch MUST come first so a WithJSCall node
@@ -126,6 +123,58 @@ void InlineCacheHandler::dump(PrintStream& out) const
 InlineCacheHandler::InlineCacheHandler()
 {
     disableThreadingChecks();
+}
+
+InlineCacheHandler::InlineCacheHandler(Ref<InlineCacheHandler>&& previous, CacheType cacheType)
+    : m_next(WTF::move(previous))
+    , m_cacheType(cacheType)
+    , m_llintCallTarget(llintCallTargetForHandler(cacheType, /* makesJSCalls */ false))
+    , m_llintJumpTarget(llintJumpTargetForCallTarget(m_llintCallTarget))
+{
+    disableThreadingChecks();
+}
+
+RefPtr<InlineCacheHandler> InlineCacheHandler::tryCreateDataOnlyGetByIdSelf(VM& vm, Ref<InlineCacheHandler>&& previous, PropertyInlineCache& propertyCache, AccessCase& accessCase)
+{
+    // Only a plain self load is servable from node data. A non-empty condition set would need
+    // watchpoints, and their owner in a compiled node is the stub routine; a poly-proto chain, a global
+    // proxy hop, or any other access type needs generated code. The watchpoint-set and impure-property
+    // tests mirror the ones tryCacheGetBy applies to its own self-access fast path.
+    if (accessCase.type() != AccessCase::Load)
+        return nullptr;
+    if (accessCase.tryGetAlternateBase())
+        return nullptr;
+    if (!accessCase.conditionSet().isEmpty())
+        return nullptr;
+    if (accessCase.polyProtoAccessChain())
+        return nullptr;
+    if (accessCase.viaGlobalProxy())
+        return nullptr;
+    if (accessCase.additionalSet())
+        return nullptr;
+    if (!isValidOffset(accessCase.offset()))
+        return nullptr;
+    Structure* structure = accessCase.structure();
+    if (!structure || structure->needImpurePropertyWatchpoint())
+        return nullptr;
+
+    // Shared with the precompiled path so the two cannot disagree on the CacheType, and so the
+    // replacement watchpoint is armed the same way.
+    CacheType cacheType = prepareGetByIdLoadNode(vm, accessCase);
+    RELEASE_ASSERT(cacheType == CacheType::GetByIdSelf);
+
+    auto result = adoptRef(*new InlineCacheHandler(WTF::move(previous), cacheType));
+    result->m_structureID = accessCase.structureID();
+    result->m_offset = accessCase.offset();
+    result->m_uid = propertyCache.identifier().uid();
+    if (!result->m_uid)
+        result->m_uid = accessCase.uid();
+    result->u.s1.m_holder = nullptr;
+    // Attached deliberately. InlineCacheHandler::visitWeak reads only m_accessCase and m_stubRoutine,
+    // and this node has no stub routine, so without the access case its cached StructureID would be
+    // invisible to GC and could outlive the Structure it names.
+    result->setAccessCase(RefPtr { &accessCase });
+    return result;
 }
 
 #if ENABLE(JIT)

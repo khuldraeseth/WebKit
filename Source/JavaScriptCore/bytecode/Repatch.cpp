@@ -347,8 +347,6 @@ enum InlineCacheAction {
     PromoteToMegamorphic,
 };
 
-#if ENABLE(JIT)
-// Helpers for the caching decision below, which is gated; exposed again when tryCacheGetBy is.
 static InlineCacheAction actionForCell(VM& vm, JSCell* cell)
 {
     Structure* structure = cell->structure();
@@ -437,7 +435,6 @@ static std::optional<NonStringPrimitiveKeyInfo> nonStringPrimitiveKeyInfoForUID(
     }
     return std::nullopt;
 }
-#endif // ENABLE(JIT)
 
 inline CodePtr<CFunctionPtrTag> NODELETE appropriateGetByOptimizeFunction(GetByKind kind)
 {
@@ -490,9 +487,6 @@ inline CodePtr<CFunctionPtrTag> NODELETE appropriateGetByOptimizeFunction(GetByK
     RELEASE_ASSERT_NOT_REACHED();
 }
 
-#if ENABLE(JIT)
-// Only reachable from repatchGetBySlowPathCall, which is gated; operationGetByIdGaveUp also still
-// lives in the gated jit/JITOperations.h.
 inline CodePtr<CFunctionPtrTag> NODELETE appropriateGetByGaveUpFunction(GetByKind kind)
 {
     switch (kind) {
@@ -543,12 +537,7 @@ inline CodePtr<CFunctionPtrTag> NODELETE appropriateGetByGaveUpFunction(GetByKin
     }
     RELEASE_ASSERT_NOT_REACHED();
 }
-#endif // ENABLE(JIT)
 
-#if ENABLE(JIT)
-// tryCacheGetBy and repatchGetBy stay gated for now: they reach InlineCacheCompiler's intrinsic-getter
-// predicate and the megamorphic operations, and without a codegen-free node factory they have nothing
-// to add anyway. operationGetByIdOptimize skips the caching attempt without the JIT.
 static InlineCacheAction tryCacheGetBy(JSGlobalObject* globalObject, CodeBlock* codeBlock, JSValue baseValue, CacheableIdentifier propertyName, const PropertySlot& slot, PropertyInlineCache& propertyCache, GetByKind kind, bool isNonStringPrimitiveKey)
 {
     VM& vm = globalObject->vm();
@@ -754,6 +743,7 @@ static InlineCacheAction tryCacheGetBy(JSGlobalObject* globalObject, CodeBlock* 
                 }
             }
 
+#if ENABLE(JIT)
             JSFunction* getter = nullptr;
             if (slot.isCacheableGetter())
                 getter = dynamicDowncast<JSFunction>(slot.getterSetter()->getter());
@@ -762,9 +752,13 @@ static InlineCacheAction tryCacheGetBy(JSGlobalObject* globalObject, CodeBlock* 
             if (slot.isCacheableCustom() && slot.domAttribute())
                 domAttribute = slot.domAttribute();
 
+            // An intrinsic getter is emitted as generated code, so this arm is JIT-only. The plain
+            // Load/Miss arm below is not, and is the one a codegen-free node can serve.
             if (!loadTargetFromProxy && getter && InlineCacheCompiler::canEmitIntrinsicGetter(propertyCache, getter, structure))
                 newCase = IntrinsicGetterAccessCase::create(vm, codeBlock, propertyName, slot.cachedOffset(), structure, conditionSet, getter, WTF::move(prototypeAccessChain));
-            else {
+            else
+#endif
+            {
                 if (isPrivate) {
                     RELEASE_ASSERT(!slot.isUnset());
                     RELEASE_ASSERT(conditionSet.isEmpty());
@@ -777,6 +771,7 @@ static InlineCacheAction tryCacheGetBy(JSGlobalObject* globalObject, CodeBlock* 
                     newCase = ProxyableAccessCase::create(vm, codeBlock, slot.isUnset() ? AccessCase::Miss : AccessCase::Load,
                         propertyName, offset, structure, conditionSet, loadTargetFromProxy, slot.watchpointSet(), WTF::move(prototypeAccessChain));
                 } else {
+#if ENABLE(JIT)
                     AccessCase::AccessType type;
                     if (slot.isCacheableGetter())
                         type = AccessCase::Getter;
@@ -796,6 +791,11 @@ static InlineCacheAction tryCacheGetBy(JSGlobalObject* globalObject, CodeBlock* 
                         slot.watchpointSet(), customAccessor,
                         slot.isCacheableCustom() && slot.slotBase() != baseValue ? slot.slotBase() : nullptr,
                         domAttribute, WTF::move(prototypeAccessChain));
+#else
+                    // Getters and custom accessors are served by generated code; the codegen-free node
+                    // factory only accepts plain loads, so decline rather than build an unservable case.
+                    return GiveUpOnCache;
+#endif
                 }
             }
         }
@@ -838,6 +838,7 @@ void repatchGetBy(JSGlobalObject* globalObject, CodeBlock* codeBlock, JSValue ba
 
     switch (tryCacheGetBy(globalObject, codeBlock, baseValue, propertyName, slot, propertyCache, kind, isNonStringPrimitiveKey)) {
     case PromoteToMegamorphic: {
+#if ENABLE(JIT)
         switch (kind) {
         case GetByKind::ById:
             repatchSlowPathCall(codeBlock, propertyCache, operationGetByIdMegamorphic);
@@ -856,7 +857,13 @@ void repatchGetBy(JSGlobalObject* globalObject, CodeBlock* codeBlock, JSValue ba
             break;
         }
         break;
+#else
+        // Megamorphic promotion installs a generated megamorphic handler; without the JIT the cache
+        // simply stays as it is.
+#endif
+        break;
     }
+
     case GiveUpOnCache:
         repatchSlowPathCall(codeBlock, propertyCache, appropriateGetByGaveUpFunction(kind));
         break;
@@ -873,6 +880,10 @@ void repatchGetBySlowPathCall(CodeBlock* codeBlock, PropertyInlineCache& propert
     resetGetBy(codeBlock, propertyCache, kind);
     repatchSlowPathCall(codeBlock, propertyCache, appropriateGetByGaveUpFunction(kind));
 }
+
+#if ENABLE(JIT)
+// Other opcodes' caching paths stay gated: they still reach InlineAccess and the operations in
+// jit/JITOperations.h, and nothing without the JIT can exercise them yet.
 
 static InlineCacheAction tryCacheArrayGetByVal(JSGlobalObject* globalObject, CodeBlock* codeBlock, JSValue baseValue, JSValue index, PropertyInlineCache& propertyCache)
 {
@@ -2223,10 +2234,12 @@ void linkDirectCall(DirectCallLinkInfo& callLinkInfo, CodeBlock* calleeCodeBlock
         calleeCodeBlock->linkIncomingCall(callLinkInfo.owner(), &callLinkInfo);
 }
 
-#endif // ENABLE(JIT)
 
 // resetGetBy and its two callees are codegen-free for a HandlerIC: repatchSlowPathCall assigns
 // m_slowOperation and resetStubAsJumpInAccess reinstalls the shared terminal.
+#endif // ENABLE(JIT)
+
+
 void resetGetBy(CodeBlock* codeBlock, PropertyInlineCache& propertyCache, GetByKind kind)
 {
     repatchSlowPathCall(codeBlock, propertyCache, appropriateGetByOptimizeFunction(kind));

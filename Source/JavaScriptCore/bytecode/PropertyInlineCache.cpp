@@ -188,11 +188,14 @@ AccessGenerationResult PropertyInlineCache::addAccessCase(const GCSafeConcurrent
             InlineCacheCompiler compiler(codeBlock->jitType(), vm, globalObject, ecmaMode, *this);
             return compiler.compileHandler(locker, WTF::move(list), codeBlock, accessCase.get());
 #else
-            // Nodes are minted by the compiler today, so without the JIT there is nothing to add: the
-            // chain stays at its terminal and every access takes the slow path. The codegen-free node
-            // factory in the next milestone is what makes this cache.
+            // No compiler, so only accesses servable from node data alone can be cached. Anything the
+            // factory declines leaves the chain at its terminal, i.e. behaves as it did before.
             UNUSED_PARAM(ecmaMode);
-            return AccessGenerationResult::GaveUp;
+            UNUSED_PARAM(list);
+            auto handler = InlineCacheHandler::tryCreateDataOnlyGetByIdSelf(vm, Ref { *m_handler }, *this, accessCase.get());
+            if (!handler)
+                return AccessGenerationResult::GaveUp;
+            return AccessGenerationResult(AccessGenerationResult::GeneratedNewCode, handler.releaseNonNull());
 #endif
         }
 
@@ -280,8 +283,14 @@ AccessGenerationResult PropertyInlineCache::addAccessCase(const GCSafeConcurrent
     if (result.generatedSomeCode()) {
         if (is<HandlerPropertyInlineCache>(*this))
             prependHandler(codeBlock, Ref { *result.handler() }, result.generatedMegamorphicCode());
+#if ENABLE(JIT)
         else
             rewireStubAsJumpInAccess(codeBlock, Ref { *result.handler() });
+#else
+        // A non-JIT cache is always a HandlerIC; there is no inline code slab to rewire.
+        else
+            RELEASE_ASSERT_NOT_REACHED();
+#endif
     }
 
     vm.writeBarrier(codeBlock);

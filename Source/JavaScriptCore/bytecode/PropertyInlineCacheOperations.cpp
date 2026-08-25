@@ -58,15 +58,33 @@ JSC_DEFINE_JIT_OPERATION(operationGetByIdOptimize, EncodedJSValue, (EncodedJSVal
 
         LOG_IC((ICEvent::OperationGetByIdOptimize, baseValue.classInfoOrNull(), baseValue == slot.slotBase()));
 
-#if ENABLE(JIT)
         CodeBlock* codeBlock = callFrame->codeBlock();
         if (propertyCache->considerRepatchingCacheBy(vm, codeBlock, baseValue.structureOrNull(), identifier))
             repatchGetBy(globalObject, codeBlock, baseValue, identifier, slot, *propertyCache, GetByKind::ById, /* isNonStringPrimitiveKey */ false);
-#endif
-        // Without the JIT the chain has no node factory yet, so this does the lookup and leaves the
-        // cache at its terminal: correct, and slow until the codegen-free factory lands.
         return found ? slot.getValue(globalObject, identifier) : jsUndefined();
     })));
+}
+
+JSC_DEFINE_JIT_OPERATION(operationGetByIdGaveUp, EncodedJSValue, (EncodedJSValue base, PropertyInlineCache* propertyCache))
+{
+    SuperSamplerScope superSamplerScope(false);
+
+    JSGlobalObject* globalObject = propertyCache->globalObject();
+    VM& vm = globalObject->vm();
+    CallFrame* callFrame = DECLARE_CALL_FRAME(vm);
+    ICSlowPathCallFrameTracer tracer(vm, callFrame, propertyCache);
+    auto scope = DECLARE_THROW_SCOPE(vm);
+
+    propertyCache->tookSlowPath = true;
+
+    JSValue baseValue = JSValue::decode(base);
+    PropertySlot slot(baseValue, PropertySlot::InternalMethodType::Get);
+    CacheableIdentifier identifier = propertyCache->identifier();
+    JSValue result = baseValue.get(globalObject, identifier, slot);
+
+    LOG_IC((ICEvent::OperationGetByIdGaveUp, baseValue.classInfoOrNull(), baseValue == slot.slotBase()));
+
+    OPERATION_RETURN(scope, JSValue::encode(result));
 }
 
 } // namespace JSC
