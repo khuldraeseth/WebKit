@@ -148,6 +148,10 @@ public:
 
     void reset(const ConcurrentJSLockerBase&, CodeBlock*);
 
+    // Codegen-free for a HandlerIC: walks the chain calling removeOwner and reinstalls the shared
+    // terminal. Only the RepatchingIC tail needs the assembler.
+    void resetStubAsJumpInAccess(CodeBlock*);
+
     void deref();
     void aboutToDie();
 
@@ -403,8 +407,6 @@ public:
     inline ScalarRegisterSet usedRegisters() const;
     inline void setUsedRegisters(ScalarRegisterSet);
     inline void removeUsedRegister(GPRReg);
-
-    void resetStubAsJumpInAccess(CodeBlock*);
 
     GPRReg thisGPR() const { return m_extraGPR; }
     GPRReg prototypeGPR() const { return m_extraGPR; }

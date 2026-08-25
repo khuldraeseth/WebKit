@@ -321,6 +321,10 @@ void ftlThunkAwareRepatchCall(CodeBlock* codeBlock, CodeLocationCall<JSInternalP
     MacroAssembler::repatchCall(call, newCalleeFunction.retagged<OperationPtrTag>());
 }
 
+#endif // ENABLE(JIT)
+
+// The get_by_id caching decision, its pure helpers, and the reset path. Assembler-touching blocks
+// inside these are gated individually; ftlThunkAwareRepatchCall above stays wholly gated.
 static void repatchSlowPathCall(CodeBlock* codeBlock, PropertyInlineCache& propertyCache, CodePtr<CFunctionPtrTag> newCalleeFunction)
 {
     if (auto* handlerIC = dynamicDowncast<HandlerPropertyInlineCache>(propertyCache)) {
@@ -343,6 +347,8 @@ enum InlineCacheAction {
     PromoteToMegamorphic,
 };
 
+#if ENABLE(JIT)
+// Helpers for the caching decision below, which is gated; exposed again when tryCacheGetBy is.
 static InlineCacheAction actionForCell(VM& vm, JSCell* cell)
 {
     Structure* structure = cell->structure();
@@ -431,6 +437,7 @@ static std::optional<NonStringPrimitiveKeyInfo> nonStringPrimitiveKeyInfoForUID(
     }
     return std::nullopt;
 }
+#endif // ENABLE(JIT)
 
 inline CodePtr<CFunctionPtrTag> NODELETE appropriateGetByOptimizeFunction(GetByKind kind)
 {
@@ -438,42 +445,110 @@ inline CodePtr<CFunctionPtrTag> NODELETE appropriateGetByOptimizeFunction(GetByK
     case GetByKind::ById:
         return operationGetByIdOptimize;
     case GetByKind::ByIdWithThis:
+#if ENABLE(JIT)
         return operationGetByIdWithThisOptimize;
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+        return { };
+#endif
     case GetByKind::ByIdDirect:
+#if ENABLE(JIT)
         return operationGetByIdDirectOptimize;
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+        return { };
+#endif
     case GetByKind::ByVal:
+#if ENABLE(JIT)
         return operationGetByValOptimize;
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+        return { };
+#endif
     case GetByKind::ByValWithThis:
+#if ENABLE(JIT)
         return operationGetByValWithThisOptimize;
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+        return { };
+#endif
     case GetByKind::PrivateName:
+#if ENABLE(JIT)
         return operationGetPrivateNameOptimize;
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+        return { };
+#endif
     case GetByKind::PrivateNameById:
+#if ENABLE(JIT)
         return operationGetPrivateNameByIdOptimize;
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+        return { };
+#endif
     }
     RELEASE_ASSERT_NOT_REACHED();
 }
 
+#if ENABLE(JIT)
+// Only reachable from repatchGetBySlowPathCall, which is gated; operationGetByIdGaveUp also still
+// lives in the gated jit/JITOperations.h.
 inline CodePtr<CFunctionPtrTag> NODELETE appropriateGetByGaveUpFunction(GetByKind kind)
 {
     switch (kind) {
     case GetByKind::ById:
         return operationGetByIdGaveUp;
     case GetByKind::ByIdWithThis:
+#if ENABLE(JIT)
         return operationGetByIdWithThisGaveUp;
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+        return { };
+#endif
     case GetByKind::ByIdDirect:
+#if ENABLE(JIT)
         return operationGetByIdDirectGaveUp;
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+        return { };
+#endif
     case GetByKind::ByVal:
+#if ENABLE(JIT)
         return operationGetByValGaveUp;
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+        return { };
+#endif
     case GetByKind::ByValWithThis:
+#if ENABLE(JIT)
         return operationGetByValWithThisGaveUp;
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+        return { };
+#endif
     case GetByKind::PrivateName:
+#if ENABLE(JIT)
         return operationGetPrivateNameGaveUp;
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+        return { };
+#endif
     case GetByKind::PrivateNameById:
+#if ENABLE(JIT)
         return operationGetPrivateNameByIdGaveUp;
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+        return { };
+#endif
     }
     RELEASE_ASSERT_NOT_REACHED();
 }
+#endif // ENABLE(JIT)
 
+#if ENABLE(JIT)
+// tryCacheGetBy and repatchGetBy stay gated for now: they reach InlineCacheCompiler's intrinsic-getter
+// predicate and the megamorphic operations, and without a codegen-free node factory they have nothing
+// to add anyway. operationGetByIdOptimize skips the caching attempt without the JIT.
 static InlineCacheAction tryCacheGetBy(JSGlobalObject* globalObject, CodeBlock* codeBlock, JSValue baseValue, CacheableIdentifier propertyName, const PropertySlot& slot, PropertyInlineCache& propertyCache, GetByKind kind, bool isNonStringPrimitiveKey)
 {
     VM& vm = globalObject->vm();
@@ -2148,12 +2223,17 @@ void linkDirectCall(DirectCallLinkInfo& callLinkInfo, CodeBlock* calleeCodeBlock
         calleeCodeBlock->linkIncomingCall(callLinkInfo.owner(), &callLinkInfo);
 }
 
+#endif // ENABLE(JIT)
+
+// resetGetBy and its two callees are codegen-free for a HandlerIC: repatchSlowPathCall assigns
+// m_slowOperation and resetStubAsJumpInAccess reinstalls the shared terminal.
 void resetGetBy(CodeBlock* codeBlock, PropertyInlineCache& propertyCache, GetByKind kind)
 {
     repatchSlowPathCall(codeBlock, propertyCache, appropriateGetByOptimizeFunction(kind));
     propertyCache.resetStubAsJumpInAccess(codeBlock);
 }
 
+#if ENABLE(JIT)
 void resetPutBy(CodeBlock* codeBlock, PropertyInlineCache& propertyCache, PutByKind kind)
 {
     CodePtr<CFunctionPtrTag> optimizedFunction;

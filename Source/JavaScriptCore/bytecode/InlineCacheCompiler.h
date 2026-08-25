@@ -48,67 +48,6 @@ class PropertyInlineCache;
 
 DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(PolymorphicAccess);
 
-class AccessGenerationResult {
-public:
-    enum Kind {
-        MadeNoChanges,
-        GaveUp,
-        Buffered,
-        GeneratedNewCode,
-        GeneratedFinalCode, // Generated so much code that we never want to generate code again.
-        GeneratedMegamorphicCode, // Generated so much code that we never want to generate code again. And this is megamorphic code.
-        ResetStubAndFireWatchpoints // We found out some data that makes us want to start over fresh with this stub. Currently, this happens when we detect poly proto.
-    };
-
-    AccessGenerationResult() = default;
-
-    AccessGenerationResult(Kind kind)
-        : m_kind(kind)
-    {
-        RELEASE_ASSERT(kind != GeneratedNewCode);
-        RELEASE_ASSERT(kind != GeneratedFinalCode);
-        RELEASE_ASSERT(kind != GeneratedMegamorphicCode);
-    }
-
-    AccessGenerationResult(Kind, Ref<InlineCacheHandler>&&);
-
-    Kind kind() const { return m_kind; }
-
-    bool madeNoChanges() const { return m_kind == MadeNoChanges; }
-    bool gaveUp() const { return m_kind == GaveUp; }
-    bool buffered() const { return m_kind == Buffered; }
-    bool generatedNewCode() const { return m_kind == GeneratedNewCode; }
-    bool generatedFinalCode() const { return m_kind == GeneratedFinalCode; }
-    bool generatedMegamorphicCode() const { return m_kind == GeneratedMegamorphicCode; }
-    bool shouldResetStubAndFireWatchpoints() const { return m_kind == ResetStubAndFireWatchpoints; }
-
-    // If we gave up on this attempt to generate code, or if we generated the "final" code, then we
-    // should give up after this.
-    bool shouldGiveUpNow() const { return gaveUp() || generatedFinalCode(); }
-
-    bool generatedSomeCode() const { return generatedNewCode() || generatedFinalCode() || generatedMegamorphicCode(); }
-
-    void dump(PrintStream&) const;
-
-    void addWatchpointToFire(InlineWatchpointSet& set, StringFireDetail detail)
-    {
-        m_watchpointsToFire.append(std::pair<InlineWatchpointSet&, StringFireDetail>(set, detail));
-    }
-    void fireWatchpoints(VM& vm)
-    {
-        ASSERT(m_kind == ResetStubAndFireWatchpoints);
-        for (auto& pair : m_watchpointsToFire)
-            pair.first.invalidate(vm, pair.second);
-    }
-
-    InlineCacheHandler* handler() const { return m_handler.get(); }
-
-private:
-    Kind m_kind { MadeNoChanges };
-    RefPtr<InlineCacheHandler> m_handler;
-    Vector<std::pair<InlineWatchpointSet&, StringFireDetail>> m_watchpointsToFire;
-};
-
 class PolymorphicAccess {
     WTF_MAKE_NONCOPYABLE(PolymorphicAccess);
     WTF_DEPRECATED_MAKE_STRUCT_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(PolymorphicAccess, PolymorphicAccess);
@@ -171,13 +110,6 @@ inline bool canUseMegamorphicPutById(VM& vm, UniquedStringImpl* uid)
 }
 
 bool NODELETE canBeViaGlobalProxy(AccessCase::AccessType);
-
-inline AccessGenerationResult::AccessGenerationResult(Kind kind, Ref<InlineCacheHandler>&& handler)
-    : m_kind(kind)
-    , m_handler(WTF::move(handler))
-{
-    RELEASE_ASSERT(kind == GeneratedNewCode || kind == GeneratedFinalCode || kind == GeneratedMegamorphicCode);
-}
 
 class InlineCacheCompiler {
 public:

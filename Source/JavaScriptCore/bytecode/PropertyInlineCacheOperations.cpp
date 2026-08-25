@@ -60,9 +60,13 @@ JSC_DEFINE_JIT_OPERATION(operationGetByIdOptimize, EncodedJSValue, (EncodedJSVal
 
         LOG_IC((ICEvent::OperationGetByIdOptimize, baseValue.classInfoOrNull(), baseValue == slot.slotBase()));
 
+#if ENABLE(JIT)
         CodeBlock* codeBlock = callFrame->codeBlock();
         if (propertyCache->considerRepatchingCacheBy(vm, codeBlock, baseValue.structureOrNull(), identifier))
             repatchGetBy(globalObject, codeBlock, baseValue, identifier, slot, *propertyCache, GetByKind::ById, /* isNonStringPrimitiveKey */ false);
+#endif
+        // Without the JIT the chain has no node factory yet, so this does the lookup and leaves the
+        // cache at its terminal: correct, and slow until the codegen-free factory lands.
         return found ? slot.getValue(globalObject, identifier) : jsUndefined();
     })));
 }
