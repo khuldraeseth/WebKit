@@ -26,17 +26,16 @@
 #include "config.h"
 #include "PropertyInlineCache.h"
 
-#include "BaselineJITRegisters.h"
 #include "CacheableIdentifierInlines.h"
-#include "DFGJITCode.h"
-#if ENABLE(JIT)
-#include "InlineCacheCompiler.h"
-#endif
 #include "Repatch.h"
 
-namespace JSC {
-
 #if ENABLE(JIT)
+#include "BaselineJITRegisters.h"
+#include "DFGJITCode.h"
+#include "InlineCacheCompiler.h"
+#endif
+
+namespace JSC {
 
 namespace PropertyInlineCacheInternal {
 static constexpr bool verbose = false;
@@ -85,8 +84,10 @@ void PropertyInlineCache::initInByIdSelf(const ConcurrentJSLockerBase& locker, C
 
 void PropertyInlineCache::deref()
 {
+#if ENABLE(JIT)
     if (auto* repatchingIC = dynamicDowncast<RepatchingPropertyInlineCache>(*this))
         repatchingIC->m_stub.reset();
+#endif
 }
 
 void PropertyInlineCache::aboutToDie()
@@ -326,73 +327,165 @@ void PropertyInlineCache::reset(const ConcurrentJSLockerBase& locker, CodeBlock*
         resetGetBy(codeBlock, *this, GetByKind::PrivateNameById);
         break;
     case AccessType::PutByIdStrict:
+#if ENABLE(JIT)
         resetPutBy(codeBlock, *this, PutByKind::ByIdStrict);
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+#endif
         break;
     case AccessType::PutByIdSloppy:
+#if ENABLE(JIT)
         resetPutBy(codeBlock, *this, PutByKind::ByIdSloppy);
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+#endif
         break;
     case AccessType::PutByIdDirectStrict:
+#if ENABLE(JIT)
         resetPutBy(codeBlock, *this, PutByKind::ByIdDirectStrict);
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+#endif
         break;
     case AccessType::PutByIdDirectSloppy:
+#if ENABLE(JIT)
         resetPutBy(codeBlock, *this, PutByKind::ByIdDirectSloppy);
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+#endif
         break;
     case AccessType::PutByValStrict:
+#if ENABLE(JIT)
         resetPutBy(codeBlock, *this, PutByKind::ByValStrict);
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+#endif
         break;
     case AccessType::PutByValSloppy:
+#if ENABLE(JIT)
         resetPutBy(codeBlock, *this, PutByKind::ByValSloppy);
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+#endif
         break;
     case AccessType::PutByValDirectStrict:
+#if ENABLE(JIT)
         resetPutBy(codeBlock, *this, PutByKind::ByValDirectStrict);
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+#endif
         break;
     case AccessType::PutByValDirectSloppy:
+#if ENABLE(JIT)
         resetPutBy(codeBlock, *this, PutByKind::ByValDirectSloppy);
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+#endif
         break;
     case AccessType::DefinePrivateNameById:
+#if ENABLE(JIT)
         resetPutBy(codeBlock, *this, PutByKind::DefinePrivateNameById);
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+#endif
         break;
     case AccessType::SetPrivateNameById:
+#if ENABLE(JIT)
         resetPutBy(codeBlock, *this, PutByKind::SetPrivateNameById);
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+#endif
         break;
     case AccessType::DefinePrivateNameByVal:
+#if ENABLE(JIT)
         resetPutBy(codeBlock, *this, PutByKind::DefinePrivateNameByVal);
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+#endif
         break;
     case AccessType::SetPrivateNameByVal:
+#if ENABLE(JIT)
         resetPutBy(codeBlock, *this, PutByKind::SetPrivateNameByVal);
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+#endif
         break;
     case AccessType::InById:
+#if ENABLE(JIT)
         resetInBy(codeBlock, *this, InByKind::ById);
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+#endif
         break;
     case AccessType::InByVal:
+#if ENABLE(JIT)
         resetInBy(codeBlock, *this, InByKind::ByVal);
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+#endif
         break;
     case AccessType::HasPrivateName:
+#if ENABLE(JIT)
         resetInBy(codeBlock, *this, InByKind::PrivateName);
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+#endif
         break;
     case AccessType::HasPrivateBrand:
+#if ENABLE(JIT)
         resetHasPrivateBrand(codeBlock, *this);
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+#endif
         break;
     case AccessType::InstanceOf:
+#if ENABLE(JIT)
         resetInstanceOf(codeBlock, *this);
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+#endif
         break;
     case AccessType::DeleteByIdStrict:
+#if ENABLE(JIT)
         resetDelBy(codeBlock, *this, DelByKind::ByIdStrict);
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+#endif
         break;
     case AccessType::DeleteByIdSloppy:
+#if ENABLE(JIT)
         resetDelBy(codeBlock, *this, DelByKind::ByIdSloppy);
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+#endif
         break;
     case AccessType::DeleteByValStrict:
+#if ENABLE(JIT)
         resetDelBy(codeBlock, *this, DelByKind::ByValStrict);
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+#endif
         break;
     case AccessType::DeleteByValSloppy:
+#if ENABLE(JIT)
         resetDelBy(codeBlock, *this, DelByKind::ByValSloppy);
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+#endif
         break;
     case AccessType::CheckPrivateBrand:
+#if ENABLE(JIT)
         resetCheckPrivateBrand(codeBlock, *this);
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+#endif
         break;
     case AccessType::SetPrivateBrand:
+#if ENABLE(JIT)
         resetSetPrivateBrand(codeBlock, *this);
+#else
+        RELEASE_ASSERT_NOT_REACHED();
+#endif
         break;
     }
 
@@ -426,10 +519,12 @@ void PropertyInlineCache::visitAggregateImpl(Visitor& visitor)
         }
     }
 
+#if ENABLE(JIT)
     if (auto* repatchingIC = dynamicDowncast<RepatchingPropertyInlineCache>(*this)) {
         if (repatchingIC->m_stub)
             repatchingIC->m_stub->visitAggregate(visitor);
     }
+#endif
 }
 
 DEFINE_VISIT_AGGREGATE(PropertyInlineCache);
@@ -468,10 +563,12 @@ void PropertyInlineCache::visitWeak(const ConcurrentJSLockerBase& locker, CodeBl
         }
     }
 
+#if ENABLE(JIT)
     if (auto* repatchingIC = dynamicDowncast<RepatchingPropertyInlineCache>(*this)) {
         if (repatchingIC->m_stub)
             isValid &= repatchingIC->m_stub->visitWeak(vm);
     }
+#endif
 
     if (isValid)
         return;
@@ -495,15 +592,19 @@ void PropertyInlineCache::propagateTransitions(Visitor& visitor)
                 cursor = cursor->next();
             }
         }
-    } else if (auto* repatchingIC = dynamicDowncast<RepatchingPropertyInlineCache>(*this)) {
+    }
+#if ENABLE(JIT)
+    else if (auto* repatchingIC = dynamicDowncast<RepatchingPropertyInlineCache>(*this)) {
         if (repatchingIC->m_stub)
             repatchingIC->m_stub->propagateTransitions(visitor);
     }
+#endif
 }
 
 template void PropertyInlineCache::propagateTransitions(AbstractSlotVisitor&);
 template void PropertyInlineCache::propagateTransitions(SlotVisitor&);
 
+#if ENABLE(JIT)
 CallLinkInfo* PropertyInlineCache::callLinkInfoAt(const ConcurrentJSLocker& locker, unsigned index, const AccessCase& accessCase)
 {
     if (auto* handlerIC = dynamicDowncast<HandlerPropertyInlineCache>(*this)) {
@@ -528,6 +629,7 @@ CallLinkInfo* PropertyInlineCache::callLinkInfoAt(const ConcurrentJSLocker& lock
         return nullptr;
     return m_handler->stubRoutine()->callLinkInfoAt(locker, index);
 }
+#endif // ENABLE(JIT)
 
 PropertyInlineCacheSummary PropertyInlineCache::summary(const ConcurrentJSLocker& locker, VM& vm) const
 {
@@ -591,6 +693,7 @@ ALWAYS_INLINE void PropertyInlineCache::setCacheType(const ConcurrentJSLockerBas
     m_cacheType = newCacheType;
 }
 
+#if ENABLE(JIT)
 static CodePtr<OperationPtrTag> NODELETE slowOperationFromUnlinkedPropertyInlineCache(const UnlinkedPropertyInlineCache& unlinkedPropertyCache)
 {
     switch (unlinkedPropertyCache.accessType) {
@@ -657,6 +760,7 @@ static CodePtr<OperationPtrTag> NODELETE slowOperationFromUnlinkedPropertyInline
     }
     return { };
 }
+#endif // ENABLE(JIT)
 
 #if ENABLE(JIT)
 void PropertyInlineCache::initializePredefinedRegisters()
@@ -1029,6 +1133,7 @@ void PropertyInlineCache::resetStubAsJumpInAccess(CodeBlock* codeBlock)
 Vector<AccessCase*, 16> PropertyInlineCache::listedAccessCases(const AbstractLocker&) const
 {
     Vector<AccessCase*, 16> cases;
+#if ENABLE(JIT)
     if (auto* repatchingIC = dynamicDowncast<RepatchingPropertyInlineCache>(*this)) {
         if (repatchingIC->m_stub) {
             for (unsigned i = 0; i < repatchingIC->m_stub->size(); ++i)
@@ -1036,6 +1141,7 @@ Vector<AccessCase*, 16> PropertyInlineCache::listedAccessCases(const AbstractLoc
             return cases;
         }
     }
+#endif
 
     if (auto* handlerIC = dynamicDowncast<HandlerPropertyInlineCache>(*this)) {
         if (handlerIC->m_inlinedHandler) {
@@ -1071,6 +1177,5 @@ void PropertyInlineCache::checkConsistency()
 }
 #endif // ASSERT_ENABLED
 
-#endif // ENABLE(JIT)
 
 } // namespace JSC

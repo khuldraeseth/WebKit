@@ -1678,24 +1678,20 @@ llintOpWithMetadata(op_get_by_id, OpGetById, macro (size, get, dispatch, metadat
     get(m_base, t0)
     loadConstantOrVariableCell(size, t0, t3, .opGetByIdSlow)   # base cell -> t3 (documented contract)
     metadata(t2, t1)                                           # t2 = &OpGetById::Metadata
-    if JIT
-        # Handler-IC dispatch (mirrors Baseline emitDataICHandlerDispatch, JITInlineCacheGenerator.cpp).
-        # Contract: base cell in t3; marshal base->a0 (baseJSR), PIC->a1 (propertyCacheGPR), head node->ws0 (handlerGPR).
-        loadp OpGetById::Metadata::m_propertyInlineCache[t2], a1   # a1 = HandlerPropertyInlineCache* (0 if useJIT() == false)
-        btpz a1, .opGetByIdSlow                                    # unseeded -> slow (also lets GetByStatus warm modeMetadata)
-        loadp constexpr (PropertyInlineCache::offsetOfHandler())[a1], ws0  # ws0 = head node
-        move t3, a0                                               # a0 = baseJSR
-        # The generic-handoff / terminal path may C-call and GC; PC (t4) is caller-saved and the
-        # CallSiteIndex must be current for valueProfile ([PB,PC]) after the call returns, so bracket
-        # the dispatch with storePC/loadPC.
-        storePC()
-        call constexpr (InlineCacheHandler::offsetOfLLIntCallTarget())[ws0], JITStubRoutinePtrTag
-        loadPC()
-        valueProfile(size, OpGetById, m_valueProfile, r0, t2)
-        return(r0)
-    else
-        performGetByIDHelper(OpGetById, m_modeMetadata, m_valueProfile, .opGetByIdSlow, size, return)
-    end
+    # Handler-IC dispatch (mirrors Baseline emitDataICHandlerDispatch, JITInlineCacheGenerator.cpp).
+    # Contract: base cell in t3; marshal base->a0 (baseJSR), PIC->a1 (propertyCacheGPR), head node->ws0 (handlerGPR).
+    loadp OpGetById::Metadata::m_propertyInlineCache[t2], a1   # a1 = HandlerPropertyInlineCache*
+    btpz a1, .opGetByIdSlow                                    # null under --useJIT=0; see link_propertyInlineCache
+    loadp constexpr (PropertyInlineCache::offsetOfHandler())[a1], ws0  # ws0 = head node
+    move t3, a0                                               # a0 = baseJSR
+    # The generic-handoff / terminal path may C-call and GC; PC (t4) is caller-saved and the
+    # CallSiteIndex must be current for valueProfile ([PB,PC]) after the call returns, so bracket
+    # the dispatch with storePC/loadPC.
+    storePC()
+    call constexpr (InlineCacheHandler::offsetOfLLIntCallTarget())[ws0], JITStubRoutinePtrTag
+    loadPC()
+    valueProfile(size, OpGetById, m_valueProfile, r0, t2)
+    return(r0)
 
 .opGetByIdSlow:
     callSlowPath(_llint_slow_path_get_by_id)
@@ -1744,9 +1740,22 @@ macro getByIdLLIntHandlerEpilogue()
     end
 end
 
+# Mirror emitDataICPrepareForCall/emitDataICRestoreAfterCall: a handler that calls out has to spill the
+# return address the prologue deliberately left in lr. X86_64 needs neither half.
+macro getByIdLLIntHandlerPrepareForCall()
+    if ARM64 or ARM64E
+        push cfr, lr
+    end
+end
+
+macro getByIdLLIntHandlerRestoreAfterCall()
+    if ARM64 or ARM64E
+        pop lr, cfr
+    end
+end
+
 
 op(llint_get_by_id_self_handler, macro ()
-    if JIT
         getByIdLLIntHandlerPrologue()
         loadi JSCell::m_structureID[a0], t2
         bineq t2, constexpr (InlineCacheHandler::offsetOfStructureID())[ws0], .miss
@@ -1757,13 +1766,9 @@ op(llint_get_by_id_self_handler, macro ()
     .miss:
         loadp constexpr (InlineCacheHandler::offsetOfNext())[ws0], ws0
         jmp constexpr (InlineCacheHandler::offsetOfLLIntJumpTarget())[ws0], JITStubRoutinePtrTag
-    else
-        notSupported()
-    end
 end)
 
 op(llint_get_by_id_prototype_handler, macro ()
-    if JIT
         getByIdLLIntHandlerPrologue()
         loadi JSCell::m_structureID[a0], t2
         bineq t2, constexpr (InlineCacheHandler::offsetOfStructureID())[ws0], .miss
@@ -1775,15 +1780,11 @@ op(llint_get_by_id_prototype_handler, macro ()
     .miss:
         loadp constexpr (InlineCacheHandler::offsetOfNext())[ws0], ws0
         jmp constexpr (InlineCacheHandler::offsetOfLLIntJumpTarget())[ws0], JITStubRoutinePtrTag
-    else
-        notSupported()
-    end
 end)
 
 # Retained for a future CacheType::GetByIdMiss; in M1 Miss nodes carry CacheType::Unset and reach the generic
 # handler instead, so this label is defined-but-unused (kept to avoid churn if Miss gets its own cacheType).
 op(llint_get_by_id_miss_handler, macro ()
-    if JIT
         getByIdLLIntHandlerPrologue()
         loadi JSCell::m_structureID[a0], t2
         bineq t2, constexpr (InlineCacheHandler::offsetOfStructureID())[ws0], .miss
@@ -1793,9 +1794,6 @@ op(llint_get_by_id_miss_handler, macro ()
     .miss:
         loadp constexpr (InlineCacheHandler::offsetOfNext())[ws0], ws0
         jmp constexpr (InlineCacheHandler::offsetOfLLIntJumpTarget())[ws0], JITStubRoutinePtrTag
-    else
-        notSupported()
-    end
 end)
 
 # JS-calling nodes (getter/setter/custom/proxy/megamorphic-getter) are UNSAFE to enter from LLInt: their
@@ -1818,11 +1816,25 @@ end)
 # op_get_by_id with the value in r0. cfr is never changed. Do NOT create an OASM frame here
 # (functionPrologue sets cfr = sp, which would break the thunk's CallFrame* recovery).
 op(llint_get_by_id_generic_handler, macro ()
+    getByIdLLIntHandlerPrologue()
     if JIT
-        getByIdLLIntHandlerPrologue()
         jmp constexpr (InlineCacheHandler::offsetOfJumpTarget())[ws0], JITStubRoutinePtrTag
     else
-        notSupported()
+        # No compiled chain, so this node ends the walk by calling the operation itself. a0 (base) and
+        # a1 (PIC) are already its two arguments, so there is nothing to marshal. Do NOT use
+        # functionPrologue(): the operation reaches CallFrame* via DECLARE_CALL_FRAME, whose
+        # __builtin_frame_address(1) only yields the JS frame because cfr is left untouched.
+        getByIdLLIntHandlerPrepareForCall()
+        # ICSlowPathCallFrameTracer asserts vm.topCallFrame == callFrame before setting it, and unlike
+        # callSlowPath's SlowPathFrameTracer it does not establish that itself. t2 is dead here.
+        loadp constexpr (PropertyInlineCache::offsetOfGlobalObject())[a1], t2
+        loadp JSGlobalObject::m_vm[t2], t2
+        storep cfr, VM::topCallFrame[t2]
+        cCall2(_operationGetByIdOptimize)
+        getByIdLLIntHandlerRestoreAfterCall()
+        branchIfException(_llint_throw_from_slow_path_trampoline)
+        getByIdLLIntHandlerEpilogue()
+        ret
     end
 end)
 

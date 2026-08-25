@@ -26,8 +26,6 @@
 #include "config.h"
 #include "PropertyInlineCacheOperations.h"
 
-#if ENABLE(JIT)
-
 #include "CacheableIdentifierInlines.h"
 #include "CodeBlock.h"
 #include "ICStats.h"
@@ -75,4 +73,3 @@ JSC_DEFINE_JIT_OPERATION(operationGetByIdOptimize, EncodedJSValue, (EncodedJSVal
 
 IGNORE_WARNINGS_END
 
-#endif // ENABLE(JIT)

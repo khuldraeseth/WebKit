@@ -479,20 +479,25 @@ bool CodeBlock::finishCreation(VM& vm, ScriptExecutable* ownerExecutable, Unlink
         metadata.m_callLinkInfo.initialize(vm, this, CallLinkInfo::callTypeFor(decltype(bytecode)::opcodeID), CodeOrigin { instruction.index() });
     };
 
-#if ENABLE(JIT)
-    // Milestone 1: seed a metadata-resident get_by_id PIC at link time so LLInt can dispatch through
-    // the shared handler chain (the same PIC Baseline reads). Note: the local must NOT be named
-    // "identifier" (shadows CodeBlock::identifier(int)).
+    // Seed a metadata-resident get_by_id PIC at link time so LLInt can dispatch through the shared
+    // handler chain (the same PIC Baseline reads). Note: the local must NOT be named "identifier"
+    // (shadows CodeBlock::identifier(int)).
     auto link_propertyInlineCache = [&](const auto& instruction, auto bytecode, auto& metadata) {
-        if (Options::useJIT()) {
-            auto* pic = m_metadataPropertyInlineCaches.add();
-            auto cacheableIdentifier = CacheableIdentifier::createFromIdentifierOwnedByCodeBlock(m_unlinkedCode.get(), identifier(bytecode.m_property));
-            pic->initializeForMetadataResidentGetById(vm, this, cacheableIdentifier, BytecodeIndex(instruction.index()));
-            metadata.m_propertyInlineCache = std::bit_cast<uintptr_t>(pic);
-        } else
+#if ENABLE(JIT)
+        // --useJIT=0 (lockdown, JSTests' no-jit mode) leaves a JIT build without runtime code
+        // generation, and this cache's terminal node is a compiled thunk there. Leave the field null so
+        // op_get_by_id falls back to the modeMetadata path, as it did before the cache existed. A build
+        // compiled without the JIT has an LLInt-native terminal instead and always seeds.
+        if (!Options::useJIT()) {
             metadata.m_propertyInlineCache = 0;
-    };
+            return;
+        }
 #endif
+        auto* pic = m_metadataPropertyInlineCaches.add();
+        auto cacheableIdentifier = CacheableIdentifier::createFromIdentifierOwnedByCodeBlock(m_unlinkedCode.get(), identifier(bytecode.m_property));
+        pic->initializeForMetadataResidentGetById(vm, this, cacheableIdentifier, BytecodeIndex(instruction.index()));
+        metadata.m_propertyInlineCache = std::bit_cast<uintptr_t>(pic);
+    };
 
 #define LINK_FIELD(__field) \
     WTF_LAZY_JOIN(link_, __field)(instruction, bytecode, metadata);
@@ -529,11 +534,7 @@ bool CodeBlock::finishCreation(VM& vm, ScriptExecutable* ownerExecutable, Unlink
         LINK(OpGetByValWithThis)
         LINK(OpToThis)
 
-#if ENABLE(JIT)
         LINK(OpGetById, propertyInlineCache)
-#else
-        LINK(OpGetById)
-#endif
         LINK(OpGetLength)
 
         LINK(OpEnumeratorNext)
@@ -1224,13 +1225,13 @@ inline void CodeBlock::forEachPropertyInlineCache(Func func)
             }
         }
     }
-    // Metadata-resident get_by_id PICs (Milestone 1). Non-empty only for the owning LLInt/Baseline
-    // block; DFG/FTL blocks iterate an empty Bag (they reach these PICs via m_alternative instead).
+#endif // ENABLE(JIT)
+    // Metadata-resident get_by_id PICs. Non-empty only for the owning LLInt/Baseline block; DFG/FTL
+    // blocks iterate an empty Bag (they reach these PICs via m_alternative instead).
     for (auto* propertyCache : m_metadataPropertyInlineCaches) {
         if (func(*propertyCache) == IterationStatus::Done)
             return;
     }
-#endif // ENABLE(JIT)
 }
 
 template<typename Visitor>
@@ -1434,12 +1435,10 @@ void CodeBlock::propagateTransitions(const ConcurrentJSLocker&, Visitor& visitor
         }
     }
 
-#if ENABLE(JIT)
     forEachPropertyInlineCache([&](PropertyInlineCache& propertyCache) {
         propertyCache.propagateTransitions(visitor);
         return IterationStatus::Continue;
     });
-#endif // ENABLE(JIT)
     
 #if ENABLE(DFG_JIT)
     if (JSC::JITCode::isOptimizingJIT(jitType())) {
@@ -1841,6 +1840,16 @@ void CodeBlock::finalizeUnconditionally(VM& vm, CollectionScope)
 #if ENABLE(JIT)
     if (!!jitCode())
         finalizeJITInlineCaches();
+#else
+    // finalizeJITInlineCaches() is where a JIT build weak-visits property caches, and it does not
+    // exist here. The metadata-resident PICs still need it: without this a dead Structure is never
+    // noticed and the cached StructureID dangles. forEachPropertyInlineCache iterates only the
+    // metadata Bag in this configuration, the tier-specific JITData loops being gated out.
+    forEachPropertyInlineCache([&](PropertyInlineCache& propertyCache) {
+        ConcurrentJSLockerBase locker(NoLockingNecessary);
+        propertyCache.visitWeak(locker, this);
+        return IterationStatus::Continue;
+    });
 #endif
 
 #if ENABLE(DFG_JIT)
@@ -2016,11 +2025,13 @@ void CodeBlock::stronglyVisitStrongReferences(const ConcurrentJSLocker& locker, 
         objectAllocationProfile.visitAggregate(visitor);
     });
 
-#if ENABLE(JIT)
+    // Marks each cache's strong references (identifier, global object, inline holder). Must run in
+    // every build: the metadata-resident PICs hold cells that nothing else keeps alive.
     forEachPropertyInlineCache([&](PropertyInlineCache& propertyCache) {
         propertyCache.visitAggregate(visitor);
         return IterationStatus::Continue;
     });
+#if ENABLE(JIT)
     if (JSC::JITCode::isOptimizingJIT(jitType())) {
 #if ENABLE(DFG_JIT)
         DFG::CommonData* dfgCommon = m_jitCode->dfgCommon();
