@@ -185,18 +185,20 @@ AccessGenerationResult PropertyInlineCache::addAccessCase(const GCSafeConcurrent
             }
 
 #if ENABLE(JIT)
-            InlineCacheCompiler compiler(codeBlock->jitType(), vm, globalObject, ecmaMode, *this);
-            return compiler.compileHandler(locker, WTF::move(list), codeBlock, accessCase.get());
-#else
-            // No compiler, so only accesses servable from node data alone can be cached. Anything the
-            // factory declines leaves the chain at its terminal, i.e. behaves as it did before.
+            if (Options::useJIT()) {
+                InlineCacheCompiler compiler(codeBlock->jitType(), vm, globalObject, ecmaMode, *this);
+                return compiler.compileHandler(locker, WTF::move(list), codeBlock, accessCase.get());
+            }
+#endif
+            // No runtime codegen -- a build without the JIT, or --useJIT=0 -- so only accesses servable
+            // from node data alone can be cached. Anything the factory declines leaves the chain at its
+            // terminal, i.e. behaves as it did before.
             UNUSED_PARAM(ecmaMode);
             UNUSED_PARAM(list);
             auto handler = InlineCacheHandler::tryCreateDataOnlyGetByIdSelf(vm, Ref { *m_handler }, *this, accessCase.get());
             if (!handler)
                 return AccessGenerationResult::GaveUp;
             return AccessGenerationResult(AccessGenerationResult::GeneratedNewCode, handler.releaseNonNull());
-#endif
         }
 
 #if ENABLE(JIT)

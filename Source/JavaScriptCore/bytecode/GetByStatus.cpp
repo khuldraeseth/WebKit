@@ -33,6 +33,7 @@
 #include "GetterSetterAccessCase.h"
 #include "ICStatusUtils.h"
 #include "InlineCacheCompiler.h"
+#include "InlineCacheHandler.h"
 #include "InlineCallFrame.h"
 #include "IntrinsicGetterAccessCase.h"
 #include "ModuleNamespaceAccessCase.h"
@@ -54,10 +55,10 @@ void GetByStatus::shrinkToFit()
     m_variants.shrinkToFit();
 }
 
-GetByStatus GetByStatus::computeFromLLInt(CodeBlock* profiledBlock, BytecodeIndex bytecodeIndex)
+GetByStatus GetByStatus::computeFromLLInt(const ConcurrentJSLocker&, CodeBlock* profiledBlock, BytecodeIndex bytecodeIndex)
 {
     VM& vm = profiledBlock->vm();
-    
+
     auto instruction = profiledBlock->instructions().at(bytecodeIndex.offset());
 
     StructureID structureID;
@@ -65,11 +66,32 @@ GetByStatus GetByStatus::computeFromLLInt(CodeBlock* profiledBlock, BytecodeInde
     switch (instruction->opcodeID()) {
     case op_get_by_id: {
         auto& metadata = instruction->as<OpGetById>().metadata(profiledBlock);
+        auto* propertyCache = std::bit_cast<PropertyInlineCache*>(metadata.m_propertyInlineCache);
+        if (!propertyCache)
+            return GetByStatus(NoInformation, false);
+
+        // Recover what GetByIdMode::Default described: a monomorphic load straight off the base.
+        // m_modeMetadata held a single entry, so require the same shape -- exactly one interpretable node
+        // ahead of the shared terminal that ends every chain. More than one means the site is polymorphic,
+        // which Default excluded too. Reads the chain under the caller's CodeBlock::m_lock.
+        //
+        // In practice this is reached only when the chain is still just the terminal, because once a self
+        // node exists the DFG's own reader (computeForPropertyInlineCacheWithoutExitSiteFeedback) has
+        // better information and computeFor never falls through to here. That was equally true of
+        // m_modeMetadata, which op_get_by_id stopped warming once it moved to this cache.
         // FIXME: We should not just bail if we see a get_by_id_proto_load.
         // https://bugs.webkit.org/show_bug.cgi?id=158039
-        if (metadata.m_modeMetadata.mode != GetByIdMode::Default)
+        InlineCacheHandler* selfNode = nullptr;
+        for (auto* node = propertyCache->firstHandler(); node; node = node->next()) {
+            if (!node->next())
+                break;
+            if (node->cacheType() != CacheType::GetByIdSelf || selfNode)
+                return GetByStatus(NoInformation, false);
+            selfNode = node;
+        }
+        if (!selfNode)
             return GetByStatus(NoInformation, false);
-        structureID = metadata.m_modeMetadata.defaultMode.structureID;
+        structureID = selfNode->structureID();
 
         identifier = &(profiledBlock->identifier(instruction->as<OpGetById>().m_property));
         break;
@@ -213,7 +235,7 @@ GetByStatus GetByStatus::computeFor(CodeBlock* profiledBlock, ICStatusMap& map, 
 #endif
 
     if (!result)
-        return computeFromLLInt(profiledBlock, codeOrigin.bytecodeIndex());
+        return computeFromLLInt(locker, profiledBlock, codeOrigin.bytecodeIndex());
     
     return result;
 }

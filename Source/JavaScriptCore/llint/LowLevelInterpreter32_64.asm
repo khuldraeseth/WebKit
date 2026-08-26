@@ -1521,74 +1521,27 @@ macro performGetByIDHelper(opcodeStruct, modeMetadataName, valueProfileName, slo
 end
 
 llintOpWithMetadata(op_get_by_id, OpGetById, macro (size, get, dispatch, metadata, return)
-    if JIT
-        metadata(t5, t0)
-        loadb OpGetById::Metadata::m_modeMetadata.mode[t5], t1
-        get(m_base, t0)
-
-    .opGetByIdProtoLoad:
-        bbneq t1, constexpr GetByIdMode::ProtoLoad, .opGetByIdArrayLength
-        loadi OpGetById::Metadata::m_modeMetadata.protoLoadMode.structureID[t5], t1
-        loadConstantOrVariablePayload(size, t0, CellTag, t3, .opGetByIdSlow)
-        loadis OpGetById::Metadata::m_modeMetadata.protoLoadMode.cachedOffset[t5], t2
-        bineq JSCell::m_structureID[t3], t1, .opGetByIdSlow
-        loadp OpGetById::Metadata::m_modeMetadata.protoLoadMode.cachedSlot[t5], t3
-        loadPropertyAtVariableOffset(t2, t3, t0, t1)
-        valueProfile(size, OpGetById, m_valueProfile, t0, t1, t5)
-        return(t0, t1)
-
-    .opGetByIdArrayLength:
-        bbneq t1, constexpr GetByIdMode::ArrayLength, .opGetByIdUnset
-        loadConstantOrVariablePayload(size, t0, CellTag, t3, .opGetByIdSlow)
-        loadb JSCell::m_indexingTypeAndMisc[t3], t2
-        btiz t2, IsArray, .opGetByIdSlow
-        btiz t2, IndexingShapeMask, .opGetByIdSlow
-        loadp JSObjectWithButterfly::m_butterfly[t3], t0
-        loadi -sizeof IndexingHeader + IndexingHeader::u.lengths.publicLength[t0], t0
-        bilt t0, 0, .opGetByIdSlow
-        valueProfile(size, OpGetById, m_valueProfile, Int32Tag, t0, t5)
-        return(Int32Tag, t0)
-
-    .opGetByIdUnset:
-        bbneq t1, constexpr GetByIdMode::Unset, .opGetByIdDefault
-        loadi OpGetById::Metadata::m_modeMetadata.unsetMode.structureID[t5], t1
-        loadConstantOrVariablePayload(size, t0, CellTag, t3, .opGetByIdSlow)
-        bineq JSCell::m_structureID[t3], t1, .opGetByIdSlow
-        valueProfile(size, OpGetById, m_valueProfile, UndefinedTag, 0, t5)
-        return(UndefinedTag, 0)
-
-    .opGetByIdDefault:
-        loadi OpGetById::Metadata::m_modeMetadata.defaultMode.structureID[t5], t1
-        loadConstantOrVariablePayload(size, t0, CellTag, t3, .opGetByIdSlow)
-        loadis OpGetById::Metadata::m_modeMetadata.defaultMode.cachedOffset[t5], t2
-        bineq JSCell::m_structureID[t3], t1, .opGetByIdSlow
-        loadPropertyAtVariableOffset(t2, t3, t0, t1)
-        valueProfile(size, OpGetById, m_valueProfile, t0, t1, t5)
-        return(t0, t1)
-
+    # Handler-IC dispatch. Contract: base cell payload -> t0, head node -> ws0 (t5). Unlike 64-bit the PIC
+    # is not kept live: the terminal is always the C call, which recovers the cache from the bytecode
+    # metadata, so no register has to survive for a compiled thunk to read.
+    get(m_base, t2)
+    loadConstantOrVariablePayload(size, t2, CellTag, t0, .opGetByIdSlow)   # index and payload must differ
+    metadata(t3, t1)
+    loadp OpGetById::Metadata::m_propertyInlineCache[t3], t1
+    btpz t1, .opGetByIdSlow   # should never fire; see the 64-bit body for why it is kept
+    loadp constexpr (PropertyInlineCache::offsetOfHandler())[t1], ws0
+    # The terminal C-calls and can GC, so PC (t4) must be reloaded and the CallSiteIndex must be current
+    # for valueProfile after the call returns.
+    storePC()
+    if C_LOOP
+        loadp constexpr (InlineCacheHandler::offsetOfLLIntCallTarget())[ws0], t2
+        cloopCallHandler t2
     else
-        # Handler-IC dispatch. Contract: base cell payload -> t0, head node -> ws0 (t5). Unlike 64-bit the
-        # PIC is not kept live: the only terminal here is the C call below, which recovers the cache from the
-        # bytecode metadata. See the handler definitions for why this is !JIT only.
-        get(m_base, t2)
-        loadConstantOrVariablePayload(size, t2, CellTag, t0, .opGetByIdSlow)   # index and payload must differ
-        metadata(t3, t1)
-        loadp OpGetById::Metadata::m_propertyInlineCache[t3], t1
-        btpz t1, .opGetByIdSlow                                    # null under --useJIT=0; see link_propertyInlineCache
-        loadp constexpr (PropertyInlineCache::offsetOfHandler())[t1], ws0
-        # The terminal C-calls and can GC, so PC (t4) must be reloaded and the CallSiteIndex must be current
-        # for valueProfile after the call returns.
-        storePC()
-        if C_LOOP
-            loadp constexpr (InlineCacheHandler::offsetOfLLIntCallTarget())[ws0], t2
-            cloopCallHandler t2
-        else
-            call constexpr (InlineCacheHandler::offsetOfLLIntCallTarget())[ws0], JITStubRoutinePtrTag
-        end
-        loadPC()
-        valueProfile(size, OpGetById, m_valueProfile, t1, t0, t2)
-        return(t1, t0)
+        call constexpr (InlineCacheHandler::offsetOfLLIntCallTarget())[ws0], JITStubRoutinePtrTag
     end
+    loadPC()
+    valueProfile(size, OpGetById, m_valueProfile, t1, t0, t2)
+    return(t1, t0)
 
 .opGetByIdSlow:
     callSlowPath(_llint_slow_path_get_by_id)
@@ -1609,70 +1562,60 @@ end)
 # call/ret frame and chain-walk steps enter the next node at offsetOfLLIntJumpTarget to skip the prologue;
 # on ARMv7 prologueSizeInBytesDataIC is 0, so the two entries coincide and the prologue is empty.
 #
-# Bodies are !JIT only, unlike 64-bit. GPRInfo::handlerGPR is r9 on ARM_THUMB2, which offlineasm treats as
-# a scratch temp (ARM_EXTRA_GPRS in arm.rb), so LLInt cannot keep the node there and therefore cannot
-# present the register state a compiled thunk expects -- there is no safe hand-off into a compiled chain,
-# and in a JIT build a chain can contain compiled nodes. A 32-bit JIT build keeps the modeMetadata path
-# above and never dispatches here. The definitions themselves are unconditional because InitBytecodes'
-# setEntryAddress references these labels in every configuration.
+# Simpler than 64-bit in one respect: the PIC does not have to stay live across the walk, because the
+# terminal recovers it from the bytecode metadata rather than reading it out of a pinned register. That
+# matters here specifically -- GPRInfo::handlerGPR is r9 on ARM_THUMB2, which offlineasm uses as a lowering
+# temp (ARM_EXTRA_GPRS in arm.rb), so LLInt could not hold a node in the register a compiled thunk reads.
+# Since LLInt never enters a compiled thunk, that never comes up.
 
 op(llint_get_by_id_self_handler, macro ()
-    if JIT
-        notSupported()
-    else
-        getByIdLLIntHandlerPrologue()
-        loadi JSCell::m_structureID[t0], t2
-        bineq t2, constexpr (InlineCacheHandler::offsetOfStructureID())[ws0], .miss
-        loadis constexpr (InlineCacheHandler::offsetOfOffset())[ws0], t2
-        loadPropertyAtVariableOffset(t2, t0, t1, t0)   # objectAndStorage is dead once payload lands
-        getByIdLLIntHandlerEpilogue()
-        ret
-    .miss:
-        loadp constexpr (InlineCacheHandler::offsetOfNext())[ws0], ws0
-        jmp constexpr (InlineCacheHandler::offsetOfLLIntJumpTarget())[ws0], JITStubRoutinePtrTag
-    end
+    getByIdLLIntHandlerPrologue()
+    loadi JSCell::m_structureID[t0], t2
+    bineq t2, constexpr (InlineCacheHandler::offsetOfStructureID())[ws0], .miss
+    loadis constexpr (InlineCacheHandler::offsetOfOffset())[ws0], t2
+    loadPropertyAtVariableOffset(t2, t0, t1, t0)   # objectAndStorage is dead once payload lands
+    getByIdLLIntHandlerEpilogue()
+    ret
+.miss:
+    loadp constexpr (InlineCacheHandler::offsetOfNext())[ws0], ws0
+    jmp constexpr (InlineCacheHandler::offsetOfLLIntJumpTarget())[ws0], JITStubRoutinePtrTag
 end)
 
 op(llint_get_by_id_prototype_handler, macro ()
-    if JIT
-        notSupported()
-    else
-        getByIdLLIntHandlerPrologue()
-        loadi JSCell::m_structureID[t0], t2
-        bineq t2, constexpr (InlineCacheHandler::offsetOfStructureID())[ws0], .miss
-        loadis constexpr (InlineCacheHandler::offsetOfOffset())[ws0], t2
-        loadp constexpr (InlineCacheHandler::offsetOfHolder())[ws0], t3   # u.s1.m_holder
-        loadPropertyAtVariableOffset(t2, t3, t1, t0)
-        getByIdLLIntHandlerEpilogue()
-        ret
-    .miss:
-        loadp constexpr (InlineCacheHandler::offsetOfNext())[ws0], ws0
-        jmp constexpr (InlineCacheHandler::offsetOfLLIntJumpTarget())[ws0], JITStubRoutinePtrTag
-    end
+    getByIdLLIntHandlerPrologue()
+    loadi JSCell::m_structureID[t0], t2
+    bineq t2, constexpr (InlineCacheHandler::offsetOfStructureID())[ws0], .miss
+    loadis constexpr (InlineCacheHandler::offsetOfOffset())[ws0], t2
+    loadp constexpr (InlineCacheHandler::offsetOfHolder())[ws0], t3   # u.s1.m_holder
+    loadPropertyAtVariableOffset(t2, t3, t1, t0)
+    getByIdLLIntHandlerEpilogue()
+    ret
+.miss:
+    loadp constexpr (InlineCacheHandler::offsetOfNext())[ws0], ws0
+    jmp constexpr (InlineCacheHandler::offsetOfLLIntJumpTarget())[ws0], JITStubRoutinePtrTag
 end)
 
 # Retained for a future CacheType::GetByIdMiss; Miss nodes currently carry CacheType::Unset and reach the
 # generic handler instead, so this label is defined-but-unused.
 op(llint_get_by_id_miss_handler, macro ()
-    if JIT
-        notSupported()
-    else
-        getByIdLLIntHandlerPrologue()
-        loadi JSCell::m_structureID[t0], t2
-        bineq t2, constexpr (InlineCacheHandler::offsetOfStructureID())[ws0], .miss
-        move UndefinedTag, t1
-        move 0, t0
-        getByIdLLIntHandlerEpilogue()
-        ret
-    .miss:
-        loadp constexpr (InlineCacheHandler::offsetOfNext())[ws0], ws0
-        jmp constexpr (InlineCacheHandler::offsetOfLLIntJumpTarget())[ws0], JITStubRoutinePtrTag
-    end
+    getByIdLLIntHandlerPrologue()
+    loadi JSCell::m_structureID[t0], t2
+    bineq t2, constexpr (InlineCacheHandler::offsetOfStructureID())[ws0], .miss
+    move UndefinedTag, t1
+    move 0, t0
+    getByIdLLIntHandlerEpilogue()
+    ret
+.miss:
+    loadp constexpr (InlineCacheHandler::offsetOfNext())[ws0], ws0
+    jmp constexpr (InlineCacheHandler::offsetOfLLIntJumpTarget())[ws0], JITStubRoutinePtrTag
 end)
 
-# Only reachable when a compiled chain exists, which never happens here -- see the note above.
+# JS-calling nodes (getter/setter/custom/proxy/megamorphic-getter) and any other node LLInt cannot
+# interpret: walk straight to the next one. Reachable in JIT builds, where the chain holds compiled nodes.
 op(llint_get_by_id_skip_handler, macro ()
-    notSupported()
+    getByIdLLIntHandlerPrologue()
+    loadp constexpr (InlineCacheHandler::offsetOfNext())[ws0], ws0
+    jmp constexpr (InlineCacheHandler::offsetOfLLIntJumpTarget())[ws0], JITStubRoutinePtrTag
 end)
 
 # Terminal: ends the walk with a C call, using the LLInt slow-path ABI (cfr, pc) rather than the
@@ -1680,30 +1623,26 @@ end)
 # payload (r0 == t0) and high word the tag (r1 == t1), which is already the handler contract.
 # Unlike callSlowPath() this must NOT restoreStateAfterCCall(): r0 is the loaded value, not a PC.
 op(llint_get_by_id_generic_handler, macro ()
-    if JIT
-        notSupported()
-    else
-        getByIdLLIntHandlerPrologue()
-        getByIdLLIntHandlerPrepareForCall()
-        prepareStateForCCall()
-        move cfr, a0
-        move PC, a1
-        cCall2(_llint_slow_path_get_by_id_handler_ic_terminal)
-        # Test for the exception BEFORE restoring, and open-coded rather than via branchIfException:
-        # lr is in offlineasm's ARMv7 scratch pool (ARM_EXTRA_GPRS), so once the return address is
-        # popped back into it, the btpz lowering here can pick lr as its temp and destroy it. t3 is
-        # dead at this point; t0/t1 hold the returned payload/tag and must survive.
-        loadp CodeBlock[cfr], t3
-        loadp CodeBlock::m_vm[t3], t3
-        btpnz VM::m_exception[t3], .handlerException
-        getByIdLLIntHandlerRestoreAfterCall()
-        getByIdLLIntHandlerEpilogue()
-        ret
-    .handlerException:
-        getByIdLLIntHandlerRestoreAfterCall()
-        getByIdLLIntHandlerEpilogue()
-        jmp _llint_throw_from_slow_path_trampoline
-    end
+    getByIdLLIntHandlerPrologue()
+    getByIdLLIntHandlerPrepareForCall()
+    prepareStateForCCall()
+    move cfr, a0
+    move PC, a1
+    cCall2(_llint_slow_path_get_by_id_handler_ic_terminal)
+    # Test for the exception BEFORE restoring, and open-coded rather than via branchIfException:
+    # lr is in offlineasm's ARMv7 scratch pool (ARM_EXTRA_GPRS), so once the return address is
+    # popped back into it, the btpz lowering here can pick lr as its temp and destroy it. t3 is
+    # dead at this point; t0/t1 hold the returned payload/tag and must survive.
+    loadp CodeBlock[cfr], t3
+    loadp CodeBlock::m_vm[t3], t3
+    btpnz VM::m_exception[t3], .handlerException
+    getByIdLLIntHandlerRestoreAfterCall()
+    getByIdLLIntHandlerEpilogue()
+    ret
+.handlerException:
+    getByIdLLIntHandlerRestoreAfterCall()
+    getByIdLLIntHandlerEpilogue()
+    jmp _llint_throw_from_slow_path_trampoline
 end)
 
 llintOpWithMetadata(op_get_length, OpGetLength, macro (size, get, dispatch, metadata, return)

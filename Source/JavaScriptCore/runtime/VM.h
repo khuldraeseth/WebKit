@@ -746,13 +746,12 @@ public:
     MacroAssemblerCodeRef<JITThunkPtrTag> getCTIStub(ThunkGenerator);
     MacroAssemblerCodeRef<JITThunkPtrTag> getCTIStub(CommonJITThunkID);
     std::unique_ptr<SharedJITStubSet> m_sharedJITStubs;
-#else
-    // Without the JIT there is no SharedJITStubSet to intern the Handler IC's terminal node in, and
-    // only op_get_by_id dispatches through it, so one shared node per VM is enough. Held here rather
-    // than narrowing SharedJITStubSet's gate: that class exists to intern compiled stubs, of which a
-    // non-JIT build has none.
-    RefPtr<InlineCacheHandler> m_llintSlowPathHandler;
 #endif
+    // The Handler IC's terminal node when there is no runtime codegen to intern it in a
+    // SharedJITStubSet -- a build without the JIT, or --useJIT=0, where m_sharedJITStubs is never
+    // created. Only op_get_by_id dispatches through it, so one shared node per VM is enough. Held here
+    // rather than narrowing SharedJITStubSet's gate: that class exists to intern compiled stubs.
+    RefPtr<InlineCacheHandler> m_llintSlowPathHandler;
 #if ENABLE(FTL_JIT)
     std::unique_ptr<FTL::Thunks> ftlThunks;
 #endif

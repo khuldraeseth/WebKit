@@ -415,8 +415,7 @@ op :get_by_id,
         valueProfile: unsigned,
     },
     metadata: {
-        modeMetadata: GetByIdModeMetadata,   # kept for the !ENABLE(JIT)/C_LOOP LLInt path and GetByStatus::computeFromLLInt
-        propertyInlineCache: uintptr_t,      # ENABLE(JIT): bit_cast<uintptr_t>(HandlerPropertyInlineCache*); 0 when unseeded (e.g. !useJIT())
+        propertyInlineCache: uintptr_t,      # bit_cast<uintptr_t>(HandlerPropertyInlineCache*), always seeded
     }
 
 op :get_length,

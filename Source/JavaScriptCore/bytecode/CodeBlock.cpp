@@ -483,16 +483,6 @@ bool CodeBlock::finishCreation(VM& vm, ScriptExecutable* ownerExecutable, Unlink
     // handler chain (the same PIC Baseline reads). Note: the local must NOT be named "identifier"
     // (shadows CodeBlock::identifier(int)).
     auto link_propertyInlineCache = [&](const auto& instruction, auto bytecode, auto& metadata) {
-#if ENABLE(JIT)
-        // --useJIT=0 (lockdown, JSTests' no-jit mode) leaves a JIT build without runtime code
-        // generation, and this cache's terminal node is a compiled thunk there. Leave the field null so
-        // op_get_by_id falls back to the modeMetadata path, as it did before the cache existed. A build
-        // compiled without the JIT has an LLInt-native terminal instead and always seeds.
-        if (!Options::useJIT()) {
-            metadata.m_propertyInlineCache = 0;
-            return;
-        }
-#endif
         auto* pic = m_metadataPropertyInlineCaches.add();
         auto cacheableIdentifier = CacheableIdentifier::createFromIdentifierOwnedByCodeBlock(m_unlinkedCode.get(), identifier(bytecode.m_property));
         pic->initializeForMetadataResidentGetById(vm, this, cacheableIdentifier, BytecodeIndex(instruction.index()));
@@ -1571,15 +1561,6 @@ void CodeBlock::finalizeLLIntInlineCaches()
             clearIfNeeded(metadata.m_prototypeModeMetadata, "instanceof"_s);
         });
 
-#if !ENABLE(JIT)
-        // Under ENABLE(JIT), op_get_by_id's cached LLInt path never warms m_modeMetadata (it uses the
-        // shared metadata-resident PIC, whose staleness is handled by PropertyInlineCache::visitWeak via
-        // forEachPropertyInlineCache). Only the non-JIT LLInt path warms m_modeMetadata.
-        m_metadata->forEach<OpGetById>([&] (auto& metadata) {
-            clearIfNeeded(metadata.m_modeMetadata, "get by id"_s);
-        });
-#endif
-
         m_metadata->forEach<OpGetLength>([&] (auto& metadata) {
             clearIfNeeded(metadata.m_modeMetadata, "get length"_s);
         });
@@ -1740,13 +1721,6 @@ void CodeBlock::finalizeLLIntInlineCaches()
             auto& instruction = instructions().at(bytecodeIndex.offset());
             OpcodeID opcode = instruction->opcodeID();
             switch (opcode) {
-#if !ENABLE(JIT)
-            case op_get_by_id: {
-                dataLogLnIf(Options::verboseOSR(), "Clearing LLInt property access.");
-                LLIntPrototypeLoadAdaptiveStructureWatchpoint::clearLLIntGetByIdCache(instruction->as<OpGetById>().metadata(this).m_modeMetadata);
-                break;
-            }
-#endif
             case op_get_length: {
                 dataLogLnIf(Options::verboseOSR(), "Clearing LLInt property access.");
                 LLIntPrototypeLoadAdaptiveStructureWatchpoint::clearLLIntGetByIdCache(instruction->as<OpGetLength>().metadata(this).m_modeMetadata);

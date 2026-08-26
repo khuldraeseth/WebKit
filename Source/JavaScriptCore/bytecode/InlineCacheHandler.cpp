@@ -339,19 +339,22 @@ Ref<InlineCacheHandler> InlineCacheHandler::createSlowPath(VM& vm, AccessType ac
 {
     auto result = adoptRef(*new InlineCacheHandler);
 #if ENABLE(JIT)
-    auto codeRef = InlineCacheCompiler::generateSlowPathCode(vm, accessType);
-    result->m_callTarget = codeRef.code().template retagged<JITStubRoutinePtrTag>();
-    result->m_jumpTarget = CodePtr<NoPtrTag> { codeRef.retaggedCode<NoPtrTag>().dataLocation<uint8_t*>() + prologueSizeInBytesDataIC }.template retagged<JITStubRoutinePtrTag>();
+    // Skipped under --useJIT=0: there is no runtime codegen, and nothing needs the compiled targets
+    // either, since Baseline is the only reader of m_callTarget/m_jumpTarget and never runs. LLInt
+    // reaches this node through m_llintCallTarget below in every configuration.
+    if (Options::useJIT()) {
+        auto codeRef = InlineCacheCompiler::generateSlowPathCode(vm, accessType);
+        result->m_callTarget = codeRef.code().template retagged<JITStubRoutinePtrTag>();
+        result->m_jumpTarget = CodePtr<NoPtrTag> { codeRef.retaggedCode<NoPtrTag>().dataLocation<uint8_t*>() + prologueSizeInBytesDataIC }.template retagged<JITStubRoutinePtrTag>();
+    }
 #else
-    // No compiled chain to enter, so the node carries only its LLInt entry: the generic handler calls
-    // operationGetByIdOptimize directly instead of tail-jumping into a thunk.
     UNUSED_PARAM(vm);
     UNUSED_PARAM(accessType);
 #endif
-    // Milestone 1: this VM-shared terminal node is reached by LLInt op_get_by_id via the generic
-    // handler tail-jump. Only op_get_by_id reads m_llintCallTarget today, so stamping the get_by_id
-    // generic handler onto every access type's shared node is safe. A future milestone that lets
-    // other opcodes LLInt-dispatch through here must make this per-AccessType.
+    // This VM-shared terminal node is where LLInt's op_get_by_id chain walk ends. Only op_get_by_id
+    // reads m_llintCallTarget today, so stamping the get_by_id generic handler onto every access
+    // type's shared node is safe. A future milestone that lets other opcodes LLInt-dispatch through
+    // here must make this per-AccessType.
     result->m_llintCallTarget = LLInt::getCodePtr<JITStubRoutinePtrTag>(llint_get_by_id_generic_handler);
     result->m_llintJumpTarget = llintJumpTargetForCallTarget(result->m_llintCallTarget);
     return result;
@@ -362,20 +365,23 @@ Ref<InlineCacheHandler> InlineCacheHandler::sharedSlowPathHandler(VM& vm, Access
 {
     ASSERT(!isCompilationThread());
 #if ENABLE(JIT)
-    if (auto handler = vm.m_sharedJITStubs->getSlowPathHandler(accessType))
-        return handler.releaseNonNull();
-    auto handler = InlineCacheHandler::createSlowPath(vm, accessType);
-    vm.m_sharedJITStubs->setSlowPathHandler(accessType, handler);
-    return handler;
-#else
-    // Only op_get_by_id reaches a terminal node without the JIT, so one cached node covers every
-    // caller. Assert rather than key on accessType, so a future opcode joining the LLInt path has to
-    // widen this deliberately.
+    if (Options::useJIT()) {
+        if (auto handler = vm.m_sharedJITStubs->getSlowPathHandler(accessType))
+            return handler.releaseNonNull();
+        auto handler = InlineCacheHandler::createSlowPath(vm, accessType);
+        vm.m_sharedJITStubs->setSlowPathHandler(accessType, handler);
+        return handler;
+    }
+    // --useJIT=0 leaves a JIT build without m_sharedJITStubs at all -- VM.cpp only creates it under
+    // Options::useJIT() -- so fall through to the interpreter-only node.
+#endif
+    // Only op_get_by_id reaches a terminal node this way, so one cached node covers every caller.
+    // Assert rather than key on accessType, so a future opcode joining the LLInt path has to widen
+    // this deliberately.
     ASSERT(accessType == AccessType::GetById);
     if (!vm.m_llintSlowPathHandler)
         vm.m_llintSlowPathHandler = InlineCacheHandler::createSlowPath(vm, accessType);
     return *vm.m_llintSlowPathHandler;
-#endif
 }
 
 template<typename Visitor>

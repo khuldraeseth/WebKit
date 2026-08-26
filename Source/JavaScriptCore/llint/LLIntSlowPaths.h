@@ -73,12 +73,11 @@ LLINT_SLOW_PATH_HIDDEN_DECL(slow_path_create_scoped_arguments);
 LLINT_SLOW_PATH_HIDDEN_DECL(slow_path_create_cloned_arguments);
 LLINT_SLOW_PATH_HIDDEN_DECL(slow_path_get_by_id_direct);
 LLINT_SLOW_PATH_HIDDEN_DECL(slow_path_get_by_id);
-#if !ENABLE(JIT)
-// Terminal node of op_get_by_id's handler chain when there is no compiled thunk to tail-jump into.
-// Uses the LLInt slow-path ABI rather than the JIT-operation one, because cCall2's C_LOOP lowering
-// assumes it. Returns the loaded value in the first result slot, not a PC.
+// Terminal node of op_get_by_id's handler chain. LLInt ends the walk here in every configuration rather
+// than tail-jumping into the node's compiled thunk, so this is not JIT-gated. Uses the LLInt slow-path ABI
+// rather than the JIT-operation one, because cCall2's C_LOOP lowering assumes it. Returns the loaded value
+// in the first result slot, not a PC.
 LLINT_SLOW_PATH_HIDDEN_DECL(slow_path_get_by_id_handler_ic_terminal);
-#endif
 LLINT_SLOW_PATH_HIDDEN_DECL(slow_path_get_length);
 LLINT_SLOW_PATH_HIDDEN_DECL(slow_path_get_by_id_with_this);
 LLINT_SLOW_PATH_HIDDEN_DECL(slow_path_get_hasInstance_from_instanceof);

@@ -81,10 +81,9 @@ void LLIntPrototypeLoadAdaptiveStructureWatchpoint::fireInternal(VM& vm, const F
 
     auto& instruction = m_owner->instructions().at(m_bytecodeIndex.get().offset());
     switch (instruction->opcodeID()) {
-    case op_get_by_id:
-        clearLLIntGetByIdCache(instruction->as<OpGetById>().metadata(m_owner.get()).m_modeMetadata);
-        break;
-
+    // No op_get_by_id arm: it caches through the metadata-resident PropertyInlineCache, whose prototype
+    // conditions are watched by the IC's own watchpoints, so one of these is never installed for it. The
+    // default below asserts if that ever stops being true.
     case op_get_length:
         clearLLIntGetByIdCache(instruction->as<OpGetLength>().metadata(m_owner.get()).m_modeMetadata);
         break;

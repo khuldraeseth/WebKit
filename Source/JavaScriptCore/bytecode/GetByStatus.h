@@ -169,7 +169,9 @@ private:
     GetByStatus(const ModuleNamespaceAccessCase&);
     static GetByStatus computeForPropertyInlineCacheWithoutExitSiteFeedback(const ConcurrentJSLocker&, CodeBlock* profiledBlock, PropertyInlineCache*, CallLinkStatus::ExitSiteData, CodeOrigin);
 #endif
-    static GetByStatus computeFromLLInt(CodeBlock*, BytecodeIndex);
+    // Takes the locker because op_get_by_id now reads the metadata-resident PropertyInlineCache's
+    // handler chain, which the main thread mutates and resets under CodeBlock::m_lock.
+    static GetByStatus computeFromLLInt(const ConcurrentJSLocker&, CodeBlock*, BytecodeIndex);
     static GetByStatus computeFor(CodeBlock*, ICStatusMap&, ExitFlag, CallLinkStatus::ExitSiteData, CodeOrigin);
 
     struct ModuleNamespaceData {

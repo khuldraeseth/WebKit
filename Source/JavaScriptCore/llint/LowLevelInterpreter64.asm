@@ -1673,7 +1673,10 @@ llintOpWithMetadata(op_get_by_id, OpGetById, macro (size, get, dispatch, metadat
     # Handler-IC dispatch (mirrors Baseline emitDataICHandlerDispatch, JITInlineCacheGenerator.cpp).
     # Contract: base cell in t3; marshal base->a0 (baseJSR), PIC->a1 (propertyCacheGPR), head node->ws0 (handlerGPR).
     loadp OpGetById::Metadata::m_propertyInlineCache[t2], a1   # a1 = HandlerPropertyInlineCache*
-    btpz a1, .opGetByIdSlow                                    # null under --useJIT=0; see link_propertyInlineCache
+    # Belt-and-braces: link_propertyInlineCache seeds this for every op_get_by_id in every configuration,
+    # so it should never be null. Kept because the branch is always-not-taken and free in practice, while
+    # a missed seeding path would be a null deref.
+    btpz a1, .opGetByIdSlow
     loadp constexpr (PropertyInlineCache::offsetOfHandler())[a1], ws0  # ws0 = head node
     move t3, a0                                               # a0 = baseJSR
     # The generic-handoff / terminal path may C-call and GC; PC (t4) is caller-saved and the
@@ -1769,43 +1772,38 @@ end)
 
 # JS-calling nodes (getter/setter/custom/proxy/megamorphic-getter) are UNSAFE to enter from LLInt: their
 # compiled thunks recompute SP from jitDataRegister (== PB under LLInt). Walk straight to the next node.
+# Unconditional: the body only follows m_next, and gating it just turns a routing mistake into a crash.
 op(llint_get_by_id_skip_handler, macro ()
-    if JIT
-        getByIdLLIntHandlerPrologue()
-        loadp constexpr (InlineCacheHandler::offsetOfNext())[ws0], ws0
-        jmp constexpr (InlineCacheHandler::offsetOfLLIntJumpTarget())[ws0], JITStubRoutinePtrTag
-    else
-        notSupported()
-    end
+    getByIdLLIntHandlerPrologue()
+    loadp constexpr (InlineCacheHandler::offsetOfNext())[ws0], ws0
+    jmp constexpr (InlineCacheHandler::offsetOfLLIntJumpTarget())[ws0], JITStubRoutinePtrTag
 end)
 
-# Terminal / non-interpretable modes (Unset terminal, ArrayLength, StringLength, Stub, and the Miss node in
-# M1): run our prologue (so the single-frame convention holds when this node is the head), then TAIL-JUMP
-# into the existing compiled thunk chain at ITS jump target (offsetOfJumpTarget), which SKIPS the thunk's
-# own emitDataICPrologue -- our prologue already established the one frame / signed return, so the thunk
-# must not run it again. a0/a1/ws0 are already set; the thunk's epilogue+ret returns directly to
-# op_get_by_id with the value in r0. cfr is never changed. Do NOT create an OASM frame here
-# (functionPrologue sets cfr = sp, which would break the thunk's CallFrame* recovery).
+# Terminal / non-interpretable modes (Unset terminal, ArrayLength, StringLength, Stub, and the Miss node):
+# end the walk with a C call, in every configuration. LLInt deliberately does NOT tail-jump into the
+# terminal node's compiled thunk even when one exists: that was the single point where LLInt entered
+# compiled code, and it cost us two things. It forced 32-bit dispatch to be non-JIT-only (handlerGPR is r9
+# on ARM_THUMB2, which offlineasm uses as a lowering temp, so LLInt cannot present the register state a
+# thunk reads), and it forced the PIC to be left unseeded under --useJIT=0, since building the thunk needs
+# codegen. One interpreter-owned terminal removes both. Baseline is unaffected -- it still enters the same
+# node through m_callTarget/m_jumpTarget and sets up its own registers.
+#
+# Uses the LLInt slow-path ABI (cfr, pc) rather than the JIT-operation one: cCall2's C_LOOP lowering
+# assumes that shape, and it avoids DECLARE_CALL_FRAME/ICSlowPathCallFrameTracer, which need
+# vm.topCallFrame established by the caller. The callee recovers the cache from the bytecode metadata.
+# Unlike callSlowPath() this must NOT restoreStateAfterCCall(): r0 is the loaded value, not a PC.
+# Do NOT create an OASM frame here -- functionPrologue sets cfr = sp, and cfr must stay the caller's.
 op(llint_get_by_id_generic_handler, macro ()
     getByIdLLIntHandlerPrologue()
-    if JIT
-        jmp constexpr (InlineCacheHandler::offsetOfJumpTarget())[ws0], JITStubRoutinePtrTag
-    else
-        # No compiled chain, so this node ends the walk with a C call. Uses the LLInt slow-path ABI
-        # (cfr, pc) rather than the JIT-operation one: cCall2's C_LOOP lowering assumes that shape, and
-        # it also avoids DECLARE_CALL_FRAME/ICSlowPathCallFrameTracer, which need vm.topCallFrame
-        # established by the caller. The callee recovers the cache from the bytecode metadata.
-        # Unlike callSlowPath() this must NOT restoreStateAfterCCall(): r0 is the loaded value, not a PC.
-        getByIdLLIntHandlerPrepareForCall()
-        prepareStateForCCall()
-        move cfr, a0
-        move PC, a1
-        cCall2(_llint_slow_path_get_by_id_handler_ic_terminal)
-        getByIdLLIntHandlerRestoreAfterCall()
-        branchIfException(_llint_throw_from_slow_path_trampoline)
-        getByIdLLIntHandlerEpilogue()
-        ret
-    end
+    getByIdLLIntHandlerPrepareForCall()
+    prepareStateForCCall()
+    move cfr, a0
+    move PC, a1
+    cCall2(_llint_slow_path_get_by_id_handler_ic_terminal)
+    getByIdLLIntHandlerRestoreAfterCall()
+    branchIfException(_llint_throw_from_slow_path_trampoline)
+    getByIdLLIntHandlerEpilogue()
+    ret
 end)
 
 

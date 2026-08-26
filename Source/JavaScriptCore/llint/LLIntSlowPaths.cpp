@@ -31,6 +31,7 @@
 #include "BaselineJITPlan.h"
 #include "BytecodeGenerator.h"
 #include "BytecodeOperandsForCheckpoint.h"
+#include "CacheableIdentifierInlines.h"
 #include "CallFrame.h"
 #include "CheckpointOSRExitSideState.h"
 #include "CodeBlockInlines.h"
@@ -60,13 +61,6 @@
 #include "JSString.h"
 #include "LLIntCommon.h"
 #include "LLIntData.h"
-#if !ENABLE(JIT)
-#include "CacheableIdentifierInlines.h"
-#include "PropertyInlineCache.h"
-// PropertyName(const CacheableIdentifier&) is defined here, not in CacheableIdentifierInlines.h.
-#include "PropertyNameInlines.h"
-#include "Repatch.h"
-#endif
 #include "LLIntEntrypoint.h"
 #include "LLIntExceptions.h"
 #include "LLIntPrototypeLoadAdaptiveStructureWatchpoint.h"
@@ -74,8 +68,12 @@
 #include "MaxFrameExtentForSlowPathCall.h"
 #include "ObjectConstructor.h"
 #include "ObjectPropertyConditionSet.h"
+#include "PropertyInlineCache.h"
+// PropertyName(const CacheableIdentifier&) is defined here, not in CacheableIdentifierInlines.h.
+#include "PropertyNameInlines.h"
 #include "ProtoCallFrameInlines.h"
 #include "RegExpObject.h"
+#include "Repatch.h"
 #include "RepatchInlines.h"
 #include "ShadowChicken.h"
 #include "SuperSampler.h"
@@ -921,11 +919,11 @@ static JSValue performLLIntGetByID(BytecodeIndex bytecodeIndex, CodeBlock* codeB
     return result;
 }
 
-#if !ENABLE(JIT)
-// Reached from llint_get_by_id_generic_handler when the chain runs out. Recovers the cache from the
-// bytecode metadata rather than taking it in a register, so the signature matches what cCall2 lowers
-// to under C_LOOP. Returns the value in the first result slot; the caller checks for an exception and
-// rets, so this must not return a PC.
+// Reached from llint_get_by_id_generic_handler when the chain runs out, in every configuration -- LLInt
+// never tail-jumps into the terminal node's compiled thunk, so this is not JIT-gated. Recovers the cache
+// from the bytecode metadata rather than taking it in a register, so the signature matches what cCall2
+// lowers to under C_LOOP. Returns the value in the first result slot; the caller checks for an exception
+// and rets, so this must not return a PC.
 LLINT_SLOW_PATH_DECL(slow_path_get_by_id_handler_ic_terminal)
 {
     LLINT_BEGIN();
@@ -950,17 +948,18 @@ LLINT_SLOW_PATH_DECL(slow_path_get_by_id_handler_ic_terminal)
     LLINT_RETURN_TWO(std::bit_cast<void*>(static_cast<uintptr_t>(result.payload())), std::bit_cast<void*>(static_cast<uintptr_t>(result.tag())));
 #endif
 }
-#endif
 
 LLINT_SLOW_PATH_DECL(slow_path_get_by_id)
 {
     LLINT_BEGIN();
     auto bytecode = pc->as<OpGetById>();
-    auto& metadata = bytecode.metadata(codeBlock);
     const Identifier& ident = codeBlock->identifier(bytecode.m_property);
     JSValue baseValue = getOperand(callFrame, bytecode.m_base);
 
-    JSValue result = performLLIntGetByID(codeBlock->bytecodeIndex(pc), codeBlock, globalObject, baseValue, ident, metadata.m_modeMetadata);
+    // Only reached when the base is not a cell, so there is no structure to key a cache on. Cell bases
+    // go through the metadata-resident PropertyInlineCache, which is seeded for every op_get_by_id.
+    PropertySlot slot(baseValue, PropertySlot::PropertySlot::InternalMethodType::Get);
+    JSValue result = baseValue.get(globalObject, ident, slot);
     LLINT_RETURN_PROFILED(result);
 }
 
