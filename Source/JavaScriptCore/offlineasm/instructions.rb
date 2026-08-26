@@ -517,6 +517,7 @@ MIPS_INSTRUCTIONS =
 CXX_INSTRUCTIONS =
     [
      "cloopCrash",              # no operands
+     "cloopCallHandler",        # operands: handler entry (an opcode)
      "cloopCallJSFunction",     # operands: callee
      "cloopCallNative",         # operands: callee
      "cloopCallSlowPath",       # operands: callTarget, currentFrame, currentPC

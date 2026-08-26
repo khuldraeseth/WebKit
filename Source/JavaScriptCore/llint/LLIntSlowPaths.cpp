@@ -60,6 +60,13 @@
 #include "JSString.h"
 #include "LLIntCommon.h"
 #include "LLIntData.h"
+#if !ENABLE(JIT)
+#include "CacheableIdentifierInlines.h"
+#include "PropertyInlineCache.h"
+// PropertyName(const CacheableIdentifier&) is defined here, not in CacheableIdentifierInlines.h.
+#include "PropertyNameInlines.h"
+#include "Repatch.h"
+#endif
 #include "LLIntEntrypoint.h"
 #include "LLIntExceptions.h"
 #include "LLIntPrototypeLoadAdaptiveStructureWatchpoint.h"
@@ -913,6 +920,32 @@ static JSValue performLLIntGetByID(BytecodeIndex bytecodeIndex, CodeBlock* codeB
 
     return result;
 }
+
+#if !ENABLE(JIT)
+// Reached from llint_get_by_id_generic_handler when the chain runs out. Recovers the cache from the
+// bytecode metadata rather than taking it in a register, so the signature matches what cCall2 lowers
+// to under C_LOOP. Returns the value in the first result slot; the caller checks for an exception and
+// rets, so this must not return a PC.
+LLINT_SLOW_PATH_DECL(slow_path_get_by_id_handler_ic_terminal)
+{
+    LLINT_BEGIN();
+    auto bytecode = pc->as<OpGetById>();
+    auto& metadata = bytecode.metadata(codeBlock);
+    auto* propertyCache = std::bit_cast<PropertyInlineCache*>(metadata.m_propertyInlineCache);
+    ASSERT(propertyCache);
+
+    CacheableIdentifier identifier = propertyCache->identifier();
+    JSValue baseValue = getOperand(callFrame, bytecode.m_base);
+
+    JSValue result = baseValue.getPropertySlot(globalObject, identifier, [&](bool found, PropertySlot& slot) -> JSValue {
+        if (propertyCache->considerRepatchingCacheBy(vm, codeBlock, baseValue.structureOrNull(), identifier))
+            repatchGetBy(globalObject, codeBlock, baseValue, identifier, slot, *propertyCache, GetByKind::ById, /* isNonStringPrimitiveKey */ false);
+        return found ? slot.getValue(globalObject, identifier) : jsUndefined();
+    });
+    LLINT_CHECK_EXCEPTION();
+    LLINT_RETURN_TWO(std::bit_cast<void*>(JSValue::encode(result)), nullptr);
+}
+#endif
 
 LLINT_SLOW_PATH_DECL(slow_path_get_by_id)
 {

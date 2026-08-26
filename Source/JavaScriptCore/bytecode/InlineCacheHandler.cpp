@@ -106,7 +106,16 @@ static CodePtr<JITStubRoutinePtrTag> llintCallTargetForHandler(CacheType cacheTy
 // is entered here, skipping it.
 static CodePtr<JITStubRoutinePtrTag> llintJumpTargetForCallTarget(CodePtr<JITStubRoutinePtrTag> callTarget)
 {
+#if ENABLE(C_LOOP)
+    // A C_LOOP "code pointer" is an opcode -- a label address under computed goto, the enum value under
+    // switch dispatch -- so there is no prologue to skip and adding an offset is meaningless. The guard
+    // is on ENABLE(C_LOOP) rather than the CPU because C_LOOP is forceable on x86_64, where the constant
+    // is 1 while the generated prologue is 0 bytes: under switch dispatch that lands on a different
+    // opcode rather than crashing.
+    return callTarget;
+#else
     return CodePtr<NoPtrTag> { callTarget.retagged<NoPtrTag>().dataLocation<uint8_t*>() + prologueSizeInBytesDataIC }.template retagged<JITStubRoutinePtrTag>();
+#endif
 }
 
 void InlineCacheHandler::dump(PrintStream& out) const

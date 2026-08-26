@@ -37,6 +37,7 @@
 #include "Interpreter.h"
 #include "LLIntCLoop.h"
 #include "LLIntData.h"
+#include "PropertyInlineCacheOperations.h"
 #include "LLIntSlowPaths.h"
 #include "JSCInlines.h"
 #include "SuperSampler.h"

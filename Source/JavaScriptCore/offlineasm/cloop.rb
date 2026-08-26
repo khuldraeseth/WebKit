@@ -91,6 +91,14 @@ class RegisterID
             "t6"
         when "t7"
             "t7"
+        # ws0/ws1 alias t9/t10 in LowLevelInterpreter.asm's generic register branch, which C_LOOP takes.
+        # ARMv7 points the same two aliases at t5/t6; do likewise rather than at csr0/csr1, which are
+        # pinned here (pcBase/numberTag). ws2/ws3 stay unmapped so a future use raises rather than
+        # silently landing on a pinned register.
+        when "t9"
+            "t5"
+        when "t10"
+            "t6"
         when "csr0"
             "pcBase"
         when "csr1"
@@ -1172,6 +1180,16 @@ class Instruction
         # We can't rely on the llint JS call mechanism which actually makes
         # use of the call instruction. Instead, we just implement JS calls
         # as an opcode dispatch.
+        # Enter a handler-chain node and resume here when its ret dispatches through lr. C_LOOP has no
+        # return-address stack, so a generic call is unimplementable; this is the same trampoline
+        # cloopCallJSFunction uses for real JS calls.
+        when "cloopCallHandler"
+            uid = $asm.newUID
+            $asm.putc "lr = getOpcode(llint_cloop_did_return_from_js_#{uid});"
+            $asm.putc "opcode = #{operands[0].clValue(:opcode)};"
+            $asm.putc "DISPATCH_OPCODE();"
+            $asm.putsLabel("llint_cloop_did_return_from_js_#{uid}", false, false, false, false)
+
         when "cloopCallJSFunction"
             uid = $asm.newUID
             $asm.putc "lr = getOpcode(llint_cloop_did_return_from_js_#{uid});"

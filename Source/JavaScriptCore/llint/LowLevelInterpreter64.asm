@@ -1688,7 +1688,14 @@ llintOpWithMetadata(op_get_by_id, OpGetById, macro (size, get, dispatch, metadat
     # CallSiteIndex must be current for valueProfile ([PB,PC]) after the call returns, so bracket
     # the dispatch with storePC/loadPC.
     storePC()
-    call constexpr (InlineCacheHandler::offsetOfLLIntCallTarget())[ws0], JITStubRoutinePtrTag
+    if C_LOOP
+        # A generic call is unimplementable under C_LOOP (offlineasm/cloop.rb lowers `call` to CRASH),
+        # so dispatch to the node and resume via lr. Precedent: callTargetFunction's C_LOOP branch.
+        loadp constexpr (InlineCacheHandler::offsetOfLLIntCallTarget())[ws0], t2
+        cloopCallHandler t2
+    else
+        call constexpr (InlineCacheHandler::offsetOfLLIntCallTarget())[ws0], JITStubRoutinePtrTag
+    end
     loadPC()
     valueProfile(size, OpGetById, m_valueProfile, r0, t2)
     return(r0)
@@ -1820,17 +1827,16 @@ op(llint_get_by_id_generic_handler, macro ()
     if JIT
         jmp constexpr (InlineCacheHandler::offsetOfJumpTarget())[ws0], JITStubRoutinePtrTag
     else
-        # No compiled chain, so this node ends the walk by calling the operation itself. a0 (base) and
-        # a1 (PIC) are already its two arguments, so there is nothing to marshal. Do NOT use
-        # functionPrologue(): the operation reaches CallFrame* via DECLARE_CALL_FRAME, whose
-        # __builtin_frame_address(1) only yields the JS frame because cfr is left untouched.
+        # No compiled chain, so this node ends the walk with a C call. Uses the LLInt slow-path ABI
+        # (cfr, pc) rather than the JIT-operation one: cCall2's C_LOOP lowering assumes that shape, and
+        # it also avoids DECLARE_CALL_FRAME/ICSlowPathCallFrameTracer, which need vm.topCallFrame
+        # established by the caller. The callee recovers the cache from the bytecode metadata.
+        # Unlike callSlowPath() this must NOT restoreStateAfterCCall(): r0 is the loaded value, not a PC.
         getByIdLLIntHandlerPrepareForCall()
-        # ICSlowPathCallFrameTracer asserts vm.topCallFrame == callFrame before setting it, and unlike
-        # callSlowPath's SlowPathFrameTracer it does not establish that itself. t2 is dead here.
-        loadp constexpr (PropertyInlineCache::offsetOfGlobalObject())[a1], t2
-        loadp JSGlobalObject::m_vm[t2], t2
-        storep cfr, VM::topCallFrame[t2]
-        cCall2(_operationGetByIdOptimize)
+        prepareStateForCCall()
+        move cfr, a0
+        move PC, a1
+        cCall2(_llint_slow_path_get_by_id_handler_ic_terminal)
         getByIdLLIntHandlerRestoreAfterCall()
         branchIfException(_llint_throw_from_slow_path_trampoline)
         getByIdLLIntHandlerEpilogue()
