@@ -23,14 +23,6 @@
 
 
 # Utilities.
-macro storePC()
-    storei PC, CallSiteIndex[cfr]
-end
-
-macro loadPC()
-    loadi CallSiteIndex[cfr], PC
-end
-
 macro getuOperandNarrow(opcodeStruct, fieldName, dst)
     loadb constexpr %opcodeStruct%_%fieldName%_index + OpcodeIDNarrowSize[PB, PC, 1], dst
 end
@@ -1729,37 +1721,9 @@ end)
 # slow-path thunk, which reads the PIC from propertyCacheGPR (== a1). Interpreted handlers therefore use
 # t2 as scratch, NOT t1 -- t1 aliases a1 (== propertyCacheGPR) on x86_64 and arm64. t2 (== a2 == r1) is
 # dead on entry and only reused by valueProfile after the call returns (write-only), so it is safe.
-
-# Mirror emitDataICPrologue/emitDataICEpilogue so the LLInt handlers share the DataIC chain's single-frame,
-# signed-return convention. The emitted size MUST equal prologueSizeInBytesDataIC (pacibsp = 4 on ARM64E,
-# push = 1 on x86_64, 0 elsewhere) because m_llintJumpTarget == m_llintCallTarget + prologueSizeInBytesDataIC.
-macro getByIdLLIntHandlerPrologue()
-    if X86_64
-        push cfr
-    elsif ARM64 or ARM64E
-        tagReturnAddress sp
-    end
-end
-
-macro getByIdLLIntHandlerEpilogue()
-    if X86_64
-        pop cfr
-    end
-end
-
-# Mirror emitDataICPrepareForCall/emitDataICRestoreAfterCall: a handler that calls out has to spill the
-# return address the prologue deliberately left in lr. X86_64 needs neither half.
-macro getByIdLLIntHandlerPrepareForCall()
-    if ARM64 or ARM64E
-        push cfr, lr
-    end
-end
-
-macro getByIdLLIntHandlerRestoreAfterCall()
-    if ARM64 or ARM64E
-        pop lr, cfr
-    end
-end
+#
+# getByIdLLIntHandlerPrologue/Epilogue/PrepareForCall/RestoreAfterCall live in LowLevelInterpreter.asm;
+# LowLevelInterpreter32_64.asm needs them too.
 
 
 op(llint_get_by_id_self_handler, macro ()

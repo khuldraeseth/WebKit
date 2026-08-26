@@ -749,6 +749,47 @@ const ModuleCode = constexpr ModuleCode
 # The interpreter steals the tag word of the argument count.
 const CallSiteIndex = ArgumentCountIncludingThis + TagOffset
 
+macro storePC()
+    storei PC, CallSiteIndex[cfr]
+end
+
+macro loadPC()
+    loadi CallSiteIndex[cfr], PC
+end
+
+# Mirror emitDataICPrologue/emitDataICEpilogue so the LLInt get_by_id handlers share the DataIC chain's
+# single-frame, signed-return convention. The emitted size MUST equal prologueSizeInBytesDataIC
+# (pacibsp = 4 on ARM64E, push = 1 on x86_64, 0 elsewhere including ARMv7) because
+# m_llintJumpTarget == m_llintCallTarget + prologueSizeInBytesDataIC.
+macro getByIdLLIntHandlerPrologue()
+    if X86_64
+        push cfr
+    elsif ARM64 or ARM64E
+        tagReturnAddress sp
+    end
+end
+
+macro getByIdLLIntHandlerEpilogue()
+    if X86_64
+        pop cfr
+    end
+end
+
+# Mirror emitDataICPrepareForCall/emitDataICRestoreAfterCall: a handler that calls out has to spill the
+# return address the prologue deliberately left in lr. X86_64 needs neither half. ARMv7 is in the same
+# position as ARM64 -- its prologue is empty, so `call` leaves the return address live in lr.
+macro getByIdLLIntHandlerPrepareForCall()
+    if ARM64 or ARM64E or ARMv7
+        push cfr, lr
+    end
+end
+
+macro getByIdLLIntHandlerRestoreAfterCall()
+    if ARM64 or ARM64E or ARMv7
+        pop lr, cfr
+    end
+end
+
 # String flags.
 const isRopeInPointer = constexpr JSString::isRopeInPointer
 const HashFlags8BitBuffer = constexpr StringImpl::s_hashFlag8BitBuffer

@@ -943,7 +943,12 @@ LLINT_SLOW_PATH_DECL(slow_path_get_by_id_handler_ic_terminal)
         return found ? slot.getValue(globalObject, identifier) : jsUndefined();
     });
     LLINT_CHECK_EXCEPTION();
+#if USE(JSVALUE64)
     LLINT_RETURN_TWO(std::bit_cast<void*>(JSValue::encode(result)), nullptr);
+#else
+    // The 32-bit handlers' contract is payload in r0, tag in r1 -- the order encodeResult packs them.
+    LLINT_RETURN_TWO(std::bit_cast<void*>(static_cast<uintptr_t>(result.payload())), std::bit_cast<void*>(static_cast<uintptr_t>(result.tag())));
+#endif
 }
 #endif
 
